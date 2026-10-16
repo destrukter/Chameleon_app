@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A stylised chameleon: round body, big eye and a curled tail, inside the 72dp safe zone. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFC5E1A5"
+        android:pathData="M30,58 C30,44 42,36 56,36 C68,36 78,42 80,52 L84,56 L78,58 C76,68 66,74 54,74 C46,74 40,72 36,68 C33,72 34,78 40,79 C45,80 47,76 44,74 C50,74 50,84 41,84 C32,84 28,76 30,68 Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M64,50 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+    <path
+        android:fillColor="#FF1B5E20"
+        android:pathData="M66,50 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
+    <path
+        android:fillColor="#FF8BC34A"
+        android:pathData="M40,74 L44,82 L48,74 Z M56,74 L60,82 L64,72 Z" />
+</vector>
