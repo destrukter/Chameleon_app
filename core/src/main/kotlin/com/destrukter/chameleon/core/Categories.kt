@@ -111,6 +111,9 @@ class CategoryRepository(val categories: List<Category>) {
 
 object Rules {
     const val MIN_PLAYERS = 3
+
+    /** Multiplayer can start with two phones so the online flow is easy to test; the game is meant for three or more. */
+    const val MIN_ONLINE_PLAYERS = 2
     const val MAX_LOCAL_PLAYERS = 30
     const val MAX_ONLINE_PLAYERS = 16
 

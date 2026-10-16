@@ -291,13 +291,13 @@ private fun LobbyContent(view: GameView, online: AppViewModel.OnlineController) 
     PlayerList(view)
     SettingsCard(view, online)
     if (view.isHost) {
-        val enough = view.players.size >= Rules.MIN_PLAYERS
+        val enough = view.players.size >= Rules.MIN_ONLINE_PLAYERS
         Button(
             onClick = { online.send(ClientMessage.Start) },
             enabled = enough,
             modifier = Modifier.fillMaxWidth().height(56.dp),
         ) {
-            Text(if (enough) "Start game" else "Waiting for players (${view.players.size}/${Rules.MIN_PLAYERS})")
+            Text(if (enough) "Start game" else "Waiting for players (${view.players.size}/${Rules.MIN_ONLINE_PLAYERS})")
         }
     } else {
         Text(

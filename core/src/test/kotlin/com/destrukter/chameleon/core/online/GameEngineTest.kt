@@ -38,9 +38,25 @@ class GameEngineTest {
     }
 
     @Test
-    fun needsThreePlayers() {
+    fun needsTwoPlayers() {
+        val alone = joinAll("Anna")
+        assertNotNull(engine.start(alone[0]))
+    }
+
+    @Test
+    fun twoPlayerRoundForTesting() {
         val ids = joinAll("Anna", "Ben")
-        assertNotNull(engine.start(ids[0]))
+        assertNull(engine.start(ids[0]))
+        engine.viewFor(ids[0]).turnOrder.forEach { assertNull(engine.submitClue(it, "x")) }
+        val impostor = ids.single { engine.viewFor(it).amImpostor }
+        val other = ids.single { it != impostor }
+        assertNull(engine.vote(impostor, other))
+        assertNull(engine.vote(other, impostor))
+        // A 1:1 tie is broken by the start player's vote, so either player may end up accused.
+        val accused = engine.viewFor(other).outcomes.single().accusedId
+        assertEquals(engine.viewFor(other).turnOrder.first().let { if (it == impostor) other else impostor }, accused)
+        if (accused == impostor) assertNull(engine.guess(impostor, 0))
+        assertEquals(Phase.RESULTS, engine.phase)
     }
 
     @Test

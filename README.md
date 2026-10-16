@@ -3,7 +3,7 @@
 An Android take on the social-deduction party game *The Chameleon*: everybody knows the secret word except
 the chameleon, who has to bluff a clue that blends in. The app adds what the 3–8 player box can't do:
 
-- **More players**: 3–30 in the local game, 3–16 in multiplayer.
+- **More players**: 3–30 in the local game, 2–16 in multiplayer (two is allowed for testing; play with three or more).
 - **More chameleons**: always fewer than half the table. Multiplayer has one voting round per chameleon.
 - **Bigger boards**: three presets, Small 4×4 (like the original card), Medium 5×5 and Large 6×6.
 - **502 topic cards**, each with 36 words (`core/src/main/resources/categories.txt`). Smaller boards use a
