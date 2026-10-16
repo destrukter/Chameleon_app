@@ -13,11 +13,12 @@ import kotlin.random.Random
 class NetworkTest {
 
     private fun client(server: HostServer, name: String) =
-        GameClient("127.0.0.1", server.port, name).also { it.connect() }
+        GameClient(TcpClientTransport("127.0.0.1", server.port), name).also { it.connect() }
 
     @Test
-    fun playsARoundOverSockets() = runBlocking {
-        val server = HostServer.start(GameEngine(testRepository(), Random(1)))
+    fun playsARoundOverSockets() = runBlocking<Unit> {
+        val session = HostSession(GameEngine(testRepository(), Random(1)))
+        val server = HostServer.start(session)
         val clients = listOf("Host", "Ben", "Cleo").map { name ->
             client(server, name).also { c -> withTimeout(5000) { c.state.first { it.status == GameClient.Status.Connected } } }
         }
@@ -56,16 +57,40 @@ class NetworkTest {
         } finally {
             clients.forEach { it.close() }
             server.close()
+            session.close()
         }
     }
 
     @Test
-    fun clientsNoticeWhenTheHostLeaves() = runBlocking {
-        val server = HostServer.start(GameEngine(testRepository(), Random(1)))
+    fun clientsNoticeWhenTheHostLeaves() = runBlocking<Unit> {
+        val session = HostSession(GameEngine(testRepository(), Random(1)))
+        val server = HostServer.start(session)
         val c = client(server, "Ben")
         withTimeout(5000) { c.state.first { it.status == GameClient.Status.Connected } }
         server.close()
+        session.close()
         withTimeout(5000) { c.state.first { it.status is GameClient.Status.Disconnected } }
         c.close()
+    }
+
+    @Test
+    fun leavingFreesTheNameRightAway() = runBlocking<Unit> {
+        val session = HostSession(GameEngine(testRepository(), Random(1)))
+        val server = HostServer.start(session)
+        try {
+            val host = client(server, "Host")
+            withTimeout(5000) { host.state.first { it.status == GameClient.Status.Connected } }
+            val ben = client(server, "Ben")
+            withTimeout(5000) { ben.state.first { it.status == GameClient.Status.Connected } }
+            ben.close()
+            withTimeout(5000) { host.state.first { s -> s.view?.players?.size == 1 } }
+            val again = client(server, "Ben")
+            withTimeout(5000) { again.state.first { it.status == GameClient.Status.Connected } }
+            host.close()
+            again.close()
+        } finally {
+            server.close()
+            session.close()
+        }
     }
 }

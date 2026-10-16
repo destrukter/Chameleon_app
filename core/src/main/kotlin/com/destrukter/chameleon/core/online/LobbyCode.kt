@@ -43,10 +43,8 @@ object LobbyCode {
             val port = m.groupValues[2].toIntOrNull() ?: BASE_PORT
             return Address(m.groupValues[1], port)
         }
-        val normalized = trimmed.uppercase()
-            .filter { !it.isWhitespace() && it != '-' }
-            .map { when (it) { 'O' -> '0'; 'I', 'L' -> '1'; else -> it } }
-        if (normalized.size != 8) return null
+        val normalized = normalize(trimmed)
+        if (normalized.length != 8) return null
         var value = 0L
         for (c in normalized) {
             val digit = ALPHABET.indexOf(c)
@@ -62,9 +60,50 @@ object LobbyCode {
         return Address(host, BASE_PORT + portIndex)
     }
 
-    fun format(input: String): String {
-        val clean = input.uppercase().filter { it.isLetterOrDigit() }.take(8)
-        return if (clean.length > 4) clean.substring(0, 4) + "-" + clean.substring(4) else clean
+    /** Upper-cases a typed code, drops separators and maps look-alike letters (O→0, I/L→1). */
+    fun normalize(input: String): String = input.uppercase()
+        .filter { it.isLetterOrDigit() }
+        .map { when (it) { 'O' -> '0'; 'I', 'L' -> '1'; else -> it } }
+        .joinToString("")
+
+    /** Groups a (partially typed) code in blocks of four: direct codes have 8 characters, internet codes 12. */
+    fun format(input: String): String =
+        input.uppercase().filter { it.isLetterOrDigit() }.take(RelayCode.LENGTH).chunked(4).joinToString("-")
+
+    /** Where a typed code points to. */
+    sealed interface JoinTarget {
+        data class Direct(val address: Address) : JoinTarget
+        data class Internet(val code: String) : JoinTarget
+    }
+
+    fun parseJoinCode(input: String): JoinTarget? =
+        decode(input)?.let { JoinTarget.Direct(it) } ?: RelayCode.parse(input)?.let { JoinTarget.Internet(input) }
+
+    /** An address this phone can be reached at, with a label for the lobby screen. */
+    data class HostAddress(val label: String, val address: Inet4Address)
+
+    /**
+     * Addresses other phones can reach directly: Wi-Fi/hotspot/Ethernet first, then VPNs such as Tailscale or
+     * ZeroTier, which let friends on other networks connect without the internet relay.
+     */
+    fun findHostAddresses(): List<HostAddress> {
+        val interfaces = runCatching { NetworkInterface.getNetworkInterfaces()?.toList() }.getOrNull().orEmpty()
+            .filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) }
+        val result = mutableListOf<HostAddress>()
+        findLanAddress()?.let { result += HostAddress("Same Wi-Fi or hotspot", it) }
+        val vpnNames = listOf("tun", "tailscale", "zt", "wg", "utun")
+        interfaces.filter { iface -> vpnNames.any { iface.name.startsWith(it) } }
+            .flatMap { it.inetAddresses.toList().filterIsInstance<Inet4Address>() }
+            .filter { it.isSiteLocalAddress || isCarrierGradeNat(it) }
+            .filter { vpn -> result.none { it.address == vpn } }
+            .forEach { result += HostAddress(if (isCarrierGradeNat(it)) "Tailscale / VPN" else "VPN", it) }
+        return result
+    }
+
+    /** 100.64.0.0/10 – used by Tailscale for its private network. */
+    private fun isCarrierGradeNat(address: Inet4Address): Boolean {
+        val bytes = address.address
+        return (bytes[0].toInt() and 0xFF) == 100 && (bytes[1].toInt() and 0xC0) == 64
     }
 
     private fun checksum(payload: Long): Long {

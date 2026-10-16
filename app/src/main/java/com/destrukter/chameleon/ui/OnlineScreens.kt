@@ -97,7 +97,7 @@ fun OnlineHomeScreen(online: AppViewModel.OnlineController, onBack: () -> Unit) 
             }
             SectionCard(title = "Create a lobby") {
                 Text(
-                    "Your phone hosts the game. Friends join with the code you'll see next.",
+                    "Your phone hosts the game. You'll get codes for friends on the same Wi-Fi and for friends anywhere else.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Button(
@@ -132,7 +132,8 @@ fun OnlineHomeScreen(online: AppViewModel.OnlineController, onBack: () -> Unit) 
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
             }
             Text(
-                "Peer-to-peer, no server: all phones must be on the same Wi-Fi, or connected to the host's mobile hotspot.",
+                "Same Wi-Fi, hotspot or VPN codes connect phones directly. Internet codes (12 characters) pass the game " +
+                    "through a free public relay, end-to-end encrypted with the code.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -155,8 +156,8 @@ fun OnlineSessionScreen(online: AppViewModel.OnlineController) {
 
     val view = state.view
     val title = when {
-        view == null -> "Lobby ${online.lobbyCode.orEmpty()}"
-        view.phase == Phase.LOBBY -> "Lobby ${online.lobbyCode.orEmpty()}"
+        view == null -> "Lobby"
+        view.phase == Phase.LOBBY -> "Lobby"
         else -> "Round ${view.roundNumber} · ${view.matrix?.category.orEmpty()}"
     }
     Scaffold(
@@ -260,33 +261,71 @@ private fun ConnectionProblem(title: String, reason: String, onBack: () -> Unit)
 @Composable
 private fun LobbyContent(view: GameView, online: AppViewModel.OnlineController) {
     val context = LocalContext.current
-    val code = online.lobbyCode.orEmpty()
+    val codes = online.codes
     SectionCard {
-        Text("Lobby code", style = MaterialTheme.typography.labelLarge)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                code,
-                style = MaterialTheme.typography.displaySmall,
+                if (codes.size == 1) "Lobby code" else "Lobby codes",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+            if (codes.isNotEmpty()) {
+                IconButton(onClick = {
+                    val text = "Join my Chameleon lobby!\n" + codes.joinToString("\n") { "${it.label}: ${it.code}" }
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, text)
+                    }
+                    context.startActivity(Intent.createChooser(send, "Share lobby code"))
+                }) {
+                    Icon(Icons.Default.Share, contentDescription = "Share codes")
+                }
+            }
+        }
+        codes.forEach { share ->
+            Text(share.label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                share.code,
+                style = if (share.code.length > 10) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.displaySmall,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = {
-                val send = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, "Join my Chameleon lobby with code $code (same Wi-Fi or my hotspot).")
-                }
-                context.startActivity(Intent.createChooser(send, "Share lobby code"))
-            }) {
-                Icon(Icons.Default.Share, contentDescription = "Share code")
-            }
         }
-        Text(
-            "Everybody must be on the same Wi-Fi as the host, or connected to the host's hotspot.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (online.isHosting) {
+            when (val relay = online.relayStatus) {
+                AppViewModel.RelayStatus.Connecting -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Text(
+                        "  Getting an internet code…",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                is AppViewModel.RelayStatus.Failed -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        relay.message,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = { online.startRelay() }) { Text("Retry") }
+                }
+                else -> Unit
+            }
+            if (codes.isEmpty() && online.relayStatus !is AppViewModel.RelayStatus.Connecting) {
+                Text(
+                    "No network found. Connect to Wi-Fi, turn on your hotspot, or go online.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+            Text(
+                "Friends anywhere use the internet code. Same Wi-Fi or VPN codes connect directly and work without internet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
     PlayerList(view)
     SettingsCard(view, online)

@@ -30,15 +30,23 @@ sources when asked). CI rebuilds and commits this file on every push.
 5. *Play again* returns to the player list with the same names, where you can add or remove players.
    You can also go back to the menu.
 
-## Multiplayer (peer to peer, no server)
+## Multiplayer
 
-One phone hosts the lobby; the game state lives on that phone. The other players connect to it directly
-over TCP on the local network. That means everybody must be **on the same Wi-Fi, or connected to the host's
-mobile hotspot**. No internet connection or account is needed.
+One phone hosts the lobby, and the game state lives on that phone. There is no game server: other phones
+reach the host in one of two ways, and both can be used in the same lobby.
 
-- **Create lobby** shows an 8-character code (e.g. `K7QM-2XRA`). The code encodes the host's local IP
-  address and port plus a checksum, so it needs no server to look it up. Players join with a name, and
-  duplicate names are rejected.
+- **Direct (8-character code, e.g. `K7QM-2XRA`)**: for phones on the same Wi-Fi, connected to the host's mobile
+  hotspot, or in the same VPN such as Tailscale or ZeroTier. The code encodes the host's IP address and port plus a
+  checksum. Phones connect over TCP and no internet is needed. The lobby shows a separate code for each network
+  the host is on (Wi-Fi and/or VPN).
+- **Over the internet (12-character code, e.g. `E4KD-9QXM-27TB`)**: for friends anywhere. The host and players
+  exchange the game messages through a free public MQTT broker (`broker.emqx.io`, falling back to
+  `broker.hivemq.com` and `test.mosquitto.org`). The broker only forwards messages: they are end-to-end encrypted
+  with AES-GCM using a key derived from the code, and the topic name is a hash of the code. This depends on those
+  free public services being up.
+
+- **Create lobby** shows the codes. Players type either code into the same field and choose a name; duplicate
+  names are rejected.
 - The host chooses the number of chameleons, the board size, the topic packs, the time to give a word, and the
   voting time. Everyone else sees the settings live in the lobby.
 - The game starts right away. Non-chameleons see the secret word highlighted on the board. The turn order is
@@ -56,7 +64,7 @@ mobile hotspot**. No internet connection or account is needed.
 
 | Module | What |
 | --- | --- |
-| `core` | Pure Kotlin/JVM: word list, game engine (host-authoritative state machine), JSON-lines protocol, lobby codes, socket host and client. Fully unit-tested, including a real game over loopback sockets. |
+| `core` | Pure Kotlin/JVM: word list, game engine (host-authoritative state machine), JSON-lines protocol, lobby codes, TCP and MQTT-relay transports. Unit-tested, including real games over loopback sockets and through an in-process MQTT broker. |
 | `app` | Android app in Jetpack Compose: menu, rules, local game screens, and multiplayer lobby/game/chat screens. |
 
 ## Building

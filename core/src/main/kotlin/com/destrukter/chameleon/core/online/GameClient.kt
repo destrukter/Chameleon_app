@@ -16,13 +16,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.Closeable
 import java.io.IOException
-import java.net.InetSocketAddress
-import java.net.Socket
 
-/** One player's connection to a [HostServer]. */
+/** One player's connection to a host, over any [ClientTransport]. */
 class GameClient(
-    private val host: String,
-    private val port: Int,
+    private val transport: ClientTransport,
     private val name: String,
     private val clock: () -> Long = System::currentTimeMillis,
 ) : Closeable {
@@ -50,7 +47,6 @@ class GameClient(
     private val outbox = Channel<String>(Channel.UNLIMITED)
     private val _state = MutableStateFlow(State())
     private val _errors = MutableSharedFlow<String>(extraBufferCapacity = 16)
-    @Volatile private var socket: Socket? = null
     @Volatile private var closed = false
 
     val state: StateFlow<State> = _state.asStateFlow()
@@ -67,21 +63,11 @@ class GameClient(
     }
 
     private suspend fun run() {
-        val s = Socket()
-        socket = s
         try {
-            s.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
-            s.tcpNoDelay = true
-            s.soTimeout = Protocol.READ_TIMEOUT_MS
-            val writer = s.getOutputStream().bufferedWriter(Charsets.UTF_8)
-            val reader = s.getInputStream().bufferedReader(Charsets.UTF_8)
+            transport.connect()
             scope.launch {
                 try {
-                    for (line in outbox) {
-                        writer.write(line)
-                        writer.write("\n")
-                        if (outbox.isEmpty) writer.flush()
-                    }
+                    for (line in outbox) transport.writeLine(line)
                 } catch (_: IOException) {
                 }
             }
@@ -93,7 +79,7 @@ class GameClient(
             }
             send(ClientMessage.Hello(name))
             while (scope.isActive) {
-                val line = reader.readLine() ?: break
+                val line = transport.readLine() ?: break
                 if (line.isBlank()) continue
                 val message = runCatching { Protocol.decodeServer(line) }.getOrNull() ?: continue
                 onMessage(message)
@@ -101,15 +87,9 @@ class GameClient(
             }
             finish(if (_state.value.status == Status.Connecting) "Could not join the lobby." else "The host closed the lobby.")
         } catch (e: IOException) {
-            finish(
-                if (_state.value.status == Status.Connecting) {
-                    "Could not reach the lobby. Make sure you are on the same Wi-Fi or hotspot as the host."
-                } else {
-                    "Lost the connection to the host."
-                }
-            )
+            finish(if (_state.value.status == Status.Connecting) transport.unreachableMessage else "Lost the connection to the host.")
         } finally {
-            runCatching { s.close() }
+            transport.close()
         }
     }
 
@@ -133,14 +113,21 @@ class GameClient(
     }
 
     override fun close() {
+        if (closed) return
         closed = true
+        // Say goodbye so the host frees our seat right away instead of waiting for a timeout,
+        // then give the writer a moment to send it. close() may run on the main thread, so no I/O here.
+        outbox.trySend(Protocol.encode(ClientMessage.Bye))
         outbox.close()
-        runCatching { socket?.close() }
-        scope.cancel()
+        scope.launch {
+            delay(CLOSE_GRACE_MS)
+            transport.close()
+            scope.cancel()
+        }
     }
 
     private companion object {
-        const val CONNECT_TIMEOUT_MS = 6_000
         const val CHAT_LIMIT = 200
+        const val CLOSE_GRACE_MS = 400L
     }
 }

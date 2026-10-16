@@ -116,9 +116,11 @@ fun RulesScreen(onBack: () -> Unit) {
                     "there is one voting round per chameleon.",
             )
             RuleSection(
-                "Multiplayer without a server",
-                "One phone hosts the lobby and shows a code. Everybody else must be on the same Wi-Fi – or connected to the " +
-                    "host's mobile hotspot – and types in that code. No internet connection or account is needed.",
+                "Multiplayer",
+                "One phone hosts the lobby – the game runs on that phone – and shows codes for the others to type in. " +
+                    "On the same Wi-Fi, the host's hotspot or a VPN like Tailscale, use the 8-character code: phones " +
+                    "connect directly, no internet needed. Friends anywhere else use the 12-character internet code, " +
+                    "which passes the game through a free public relay, end-to-end encrypted with the code. No account needed.",
             )
         }
     }

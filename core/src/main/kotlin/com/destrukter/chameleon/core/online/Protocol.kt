@@ -53,6 +53,10 @@ sealed interface ClientMessage {
 
     @Serializable @SerialName("ping")
     data object Ping : ClientMessage
+
+    /** Sent when leaving on purpose, so the host does not have to wait for a timeout (matters for the relay). */
+    @Serializable @SerialName("bye")
+    data object Bye : ClientMessage
 }
 
 @Serializable

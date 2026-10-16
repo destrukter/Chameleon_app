@@ -16,10 +16,15 @@ import com.destrukter.chameleon.core.PackInfo
 import com.destrukter.chameleon.core.Rules
 import com.destrukter.chameleon.core.WordMatrix
 import com.destrukter.chameleon.core.online.ClientMessage
+import com.destrukter.chameleon.core.online.ClientTransport
 import com.destrukter.chameleon.core.online.GameClient
 import com.destrukter.chameleon.core.online.GameEngine
 import com.destrukter.chameleon.core.online.HostServer
+import com.destrukter.chameleon.core.online.HostSession
 import com.destrukter.chameleon.core.online.LobbyCode
+import com.destrukter.chameleon.core.online.RelayClientTransport
+import com.destrukter.chameleon.core.online.RelayHost
+import com.destrukter.chameleon.core.online.TcpClientTransport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -217,6 +222,20 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Peer-to-peer play: one phone hosts the lobby, the others connect to it over the local network. */
+    /** A code players can type to join, with where it works ("Over the internet", "Same Wi-Fi or hotspot", …). */
+    data class ShareCode(val label: String, val code: String)
+
+    sealed interface RelayStatus {
+        data object Off : RelayStatus
+        data object Connecting : RelayStatus
+        data object Ready : RelayStatus
+        data class Failed(val message: String) : RelayStatus
+    }
+
+    /**
+     * Multiplayer: one phone hosts the lobby. Others join directly over the local network or a VPN, or through
+     * a public internet relay when they are somewhere else.
+     */
     inner class OnlineController {
         var name by mutableStateOf(prefs.getString(KEY_ONLINE_NAME, "").orEmpty())
         var code by mutableStateOf(prefs.getString(KEY_LAST_CODE, "").orEmpty())
@@ -224,16 +243,22 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             private set
         var busy by mutableStateOf(false)
             private set
-        var lobbyCode by mutableStateOf<String?>(null)
+        /** Codes for the current lobby: all ways in for the host, the code used for everyone else. */
+        var codes by mutableStateOf<List<ShareCode>>(emptyList())
+            private set
+        var relayStatus by mutableStateOf<RelayStatus>(RelayStatus.Off)
             private set
         var client by mutableStateOf<GameClient?>(null)
             private set
 
+        private var session: HostSession? = null
         private var server: HostServer? = null
+        private var relay: RelayHost? = null
+        private var directCodes: List<ShareCode> = emptyList()
         private val idleState = MutableStateFlow(GameClient.State())
 
         val state: StateFlow<GameClient.State> get() = client?.state ?: idleState
-        val isHosting: Boolean get() = server != null
+        val isHosting: Boolean get() = session != null
 
         fun host() {
             val player = validName() ?: return
@@ -242,36 +267,74 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             viewModelScope.launch {
                 val result = withContext(Dispatchers.IO) {
                     runCatching {
-                        val address = LobbyCode.findLanAddress()
-                            ?: throw IllegalStateException(
-                                "No Wi-Fi network found. Connect to Wi-Fi or turn on your phone's hotspot, then try again."
-                            )
-                        val newServer = HostServer.start(GameEngine(repo()))
-                        newServer to LobbyCode.encode(address, newServer.port)
+                        val newSession = HostSession(GameEngine(repo()))
+                        val newServer = try {
+                            HostServer.start(newSession)
+                        } catch (e: Exception) {
+                            newSession.close()
+                            throw e
+                        }
+                        val direct = LobbyCode.findHostAddresses().map {
+                            ShareCode(it.label, LobbyCode.encode(it.address, newServer.port))
+                        }
+                        Triple(newSession, newServer, direct)
                     }
                 }
                 busy = false
-                result.onSuccess { (newServer, newCode) ->
+                result.onSuccess { (newSession, newServer, direct) ->
+                    session = newSession
                     server = newServer
-                    lobbyCode = newCode
-                    connect("127.0.0.1", newServer.port, player)
+                    directCodes = direct
+                    codes = direct
+                    connect(TcpClientTransport("127.0.0.1", newServer.port), player)
+                    startRelay()
                 }.onFailure {
                     error = it.message ?: "Could not create a lobby."
                 }
             }
         }
 
+        /** Opens the lobby to the internet through a public relay; the host can retry if it failed. */
+        fun startRelay() {
+            val current = session ?: return
+            if (relayStatus == RelayStatus.Connecting || relayStatus == RelayStatus.Ready) return
+            relayStatus = RelayStatus.Connecting
+            viewModelScope.launch {
+                val result = withContext(Dispatchers.IO) { runCatching { RelayHost.start(current) } }
+                if (session !== current) {
+                    result.getOrNull()?.close()
+                    return@launch
+                }
+                result.onSuccess {
+                    relay = it
+                    relayStatus = RelayStatus.Ready
+                    codes = listOf(ShareCode("Over the internet", it.code)) + directCodes
+                }.onFailure {
+                    relayStatus = RelayStatus.Failed("Couldn't reach the internet relay. Check your connection.")
+                }
+            }
+        }
+
         fun join() {
             val player = validName() ?: return
-            val address = LobbyCode.decode(code)
-            if (address == null) {
+            val target = LobbyCode.parseJoinCode(code)
+            if (target == null) {
                 error = "That lobby code is not valid. Check it for typos."
                 return
             }
             error = null
-            prefs.edit().putString(KEY_LAST_CODE, LobbyCode.format(code)).apply()
-            lobbyCode = LobbyCode.format(code)
-            connect(address.host, address.port, player)
+            val formatted = LobbyCode.format(code)
+            prefs.edit().putString(KEY_LAST_CODE, formatted).apply()
+            when (target) {
+                is LobbyCode.JoinTarget.Direct -> {
+                    codes = listOf(ShareCode("Same network", formatted))
+                    connect(TcpClientTransport(target.address.host, target.address.port), player)
+                }
+                is LobbyCode.JoinTarget.Internet -> {
+                    codes = listOf(ShareCode("Over the internet", formatted))
+                    connect(RelayClientTransport(target.code), player)
+                }
+            }
         }
 
         fun send(message: ClientMessage) {
@@ -281,9 +344,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         fun leave() {
             client?.close()
             client = null
-            server?.close()
+            val oldRelay = relay
+            val oldServer = server
+            val oldSession = session
+            relay = null
             server = null
-            lobbyCode = null
+            session = null
+            codes = emptyList()
+            directCodes = emptyList()
+            relayStatus = RelayStatus.Off
+            // Closing the relay waits for the broker, so keep it off the main thread. The client's goodbye goes first.
+            if (oldRelay != null || oldServer != null || oldSession != null) {
+                Thread {
+                    Thread.sleep(500)
+                    runCatching { oldRelay?.close() }
+                    runCatching { oldServer?.close() }
+                    runCatching { oldSession?.close() }
+                }.start()
+            }
         }
 
         fun leaveToHome() {
@@ -291,9 +369,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             screen = Screen.OnlineHome
         }
 
-        private fun connect(host: String, port: Int, player: String) {
+        private fun connect(transport: ClientTransport, player: String) {
             client?.close()
-            client = GameClient(host, port, player).also { it.connect() }
+            client = GameClient(transport, player).also { it.connect() }
             screen = Screen.OnlineSession
         }
 
