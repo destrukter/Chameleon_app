@@ -10,7 +10,7 @@ class CategoriesTest {
     @Test
     fun bundledWordListHas500FullCategories() {
         val repo = CategoryRepository.loadBundled()
-        assertEquals(500, repo.categories.size)
+        assertTrue("only ${repo.categories.size} topics", repo.categories.size >= 500)
         val names = repo.categories.map { it.name.lowercase() }
         assertEquals("Duplicate category names: ${names.groupBy { it }.filter { it.value.size > 1 }.keys}", names.size, names.toSet().size)
         for (category in repo.categories) {
@@ -19,6 +19,46 @@ class CategoriesTest {
             assertEquals("${category.name} has duplicates: ${lower.groupBy { it }.filter { it.value.size > 1 }.keys}", lower.size, lower.toSet().size)
             category.words.forEach { assertTrue("${category.name}: '$it' too long", it.length <= 18) }
         }
+    }
+
+    @Test
+    fun bundledTopicsAreSortedIntoPacks() {
+        val repo = CategoryRepository.loadBundled()
+        assertTrue(repo.categories.none { it.pack == CategoryRepository.DEFAULT_PACK })
+        assertTrue(repo.packs.size >= 8)
+        val gaming = repo.packs.single { it.name == "Gaming" }
+        assertTrue("Gaming has ${gaming.topicCount} topics", gaming.topicCount >= 20)
+        repo.packs.forEach { assertTrue("${it.name} is too small", it.topicCount >= 10) }
+    }
+
+    @Test
+    fun parsesPackHeaders() {
+        val repo = CategoryRepository.parse(
+            """
+            # comment
+            Loose|a,b
+            [Gaming]
+            Consoles|x,y
+            Arcade|z
+            [Food]
+            Fruit|f
+            """.trimIndent()
+        )
+        assertEquals(listOf(PackInfo("General", 1), PackInfo("Gaming", 2), PackInfo("Food", 1)), repo.packs)
+        assertEquals("Gaming", repo.categories.single { it.name == "Arcade" }.pack)
+    }
+
+    @Test
+    fun dealOnlyUsesEnabledPacks() {
+        val repo = CategoryRepository(
+            (1..6).map { c -> Category("Topic $c", (1..36).map { "W$c-$it" }, pack = if (c <= 2) "Gaming" else "Food") }
+        )
+        repeat(50) {
+            val matrix = repo.deal(MatrixSize.LARGE, Random(it), disabledPacks = setOf("Food"))
+            assertTrue(matrix.category in setOf("Topic 1", "Topic 2"))
+        }
+        // Switching off every pack falls back to all of them rather than failing.
+        assertEquals(setOf("Gaming", "Food"), repo.enabledPacks(setOf("Gaming", "Food")))
     }
 
     @Test

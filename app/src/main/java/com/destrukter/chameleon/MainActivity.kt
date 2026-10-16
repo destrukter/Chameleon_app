@@ -42,7 +42,7 @@ private fun ChameleonApp(onExit: () -> Unit, vm: AppViewModel = viewModel()) {
             onRules = { vm.navigate(Screen.Rules) },
         )
         Screen.Rules -> RulesScreen(onBack = back)
-        Screen.LocalSetup -> LocalSetupScreen(vm.local, onBack = back)
+        Screen.LocalSetup -> LocalSetupScreen(vm.local, vm.packs, onBack = back)
         Screen.LocalCategory -> LocalCategoryScreen(vm.local, onBack = back)
         Screen.LocalPass -> LocalPassScreen(vm.local, onBack = back)
         Screen.LocalOverview -> LocalOverviewScreen(vm.local, onMenu = { vm.navigate(Screen.Menu) })

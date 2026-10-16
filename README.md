@@ -6,8 +6,12 @@ the chameleon, who has to bluff a clue that blends in. The app adds what the 3�
 - **More players**: 3–30 in the local game, 3–16 in multiplayer.
 - **More chameleons**: always fewer than half the table. Multiplayer has one voting round per chameleon.
 - **Bigger boards**: three presets, Small 4×4 (like the original card), Medium 5×5 and Large 6×6.
-- **500 topic cards**, each with 36 words (`core/src/main/resources/categories.txt`). Smaller boards use a
+- **502 topic cards**, each with 36 words (`core/src/main/resources/categories.txt`). Smaller boards use a
   random subset of a topic's words, so the same topic plays differently each time.
+- **Topic packs**: the cards are sorted into 12 themed packs, which can be switched on and off before a game.
+  The packs are Animals & Nature, Food & Drink, Places & Travel, Sports & Outdoors, Gaming, Movies, TV & Books,
+  Fantasy, Myth & History, Science & Tech, Arts, Music & Fashion, Home & Everyday Life, Out and About, and
+  Describe It ("Things that are red", "Things with wheels", …).
 
 ## Install
 
@@ -16,8 +20,8 @@ sources when asked). CI rebuilds and commits this file on every push.
 
 ## Local game (pass & play)
 
-1. Type in everybody's names. The game counts them when you press *Start*. Pick the number of chameleons
-   and the board size.
+1. Type in everybody's names. The game counts them when you press *Start*. Pick the number of chameleons,
+   the board size and the topic packs to play with (remembered for next time).
 2. The topic card is shown. *Accept* it, or *Reshuffle* to draw a different topic.
 3. Pass the phone around. Each player sees their name, taps *Show*, sees the secret word (or
    "You are the Chameleon!"), then taps *Hide & next*. There are no dice; the phone hands out the word directly.
@@ -35,7 +39,8 @@ mobile hotspot**. No internet connection or account is needed.
 - **Create lobby** shows an 8-character code (e.g. `K7QM-2XRA`). The code encodes the host's local IP
   address and port plus a checksum, so it needs no server to look it up. Players join with a name, and
   duplicate names are rejected.
-- The host chooses the number of chameleons, the board size, the time to give a word, and the voting time.
+- The host chooses the number of chameleons, the board size, the topic packs, the time to give a word, and the
+  voting time. Everyone else sees the settings live in the lobby.
 - The game starts right away. Non-chameleons see the secret word highlighted on the board. The turn order is
   random, and each player has to type their word before their timer runs out (otherwise the turn is skipped).
 - A chat stays open the whole time for discussion.

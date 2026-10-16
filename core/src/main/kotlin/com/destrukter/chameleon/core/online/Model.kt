@@ -1,6 +1,7 @@
 package com.destrukter.chameleon.core.online
 
 import com.destrukter.chameleon.core.MatrixSize
+import com.destrukter.chameleon.core.PackInfo
 import com.destrukter.chameleon.core.WordMatrix
 import kotlinx.serialization.Serializable
 
@@ -10,6 +11,8 @@ data class OnlineSettings(
     val matrixSize: MatrixSize = MatrixSize.SMALL,
     val turnSeconds: Int = 45,
     val voteSeconds: Int = 90,
+    /** Topic packs the host switched off. Empty means every pack is in play. */
+    val disabledPacks: Set<String> = emptySet(),
 ) {
     fun sanitized(): OnlineSettings = copy(
         impostors = impostors.coerceIn(1, MAX_IMPOSTORS),
@@ -81,6 +84,8 @@ data class GameView(
     val phase: Phase,
     val players: List<PlayerInfo>,
     val settings: OnlineSettings,
+    /** The host's topic packs, so every player sees the same choice in the lobby. */
+    val packs: List<PackInfo> = emptyList(),
     val roundNumber: Int = 0,
     val impostorCount: Int = 0,
     val matrix: WordMatrix? = null,

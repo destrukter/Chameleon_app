@@ -122,7 +122,9 @@ class GameEngine(
     fun updateSettings(by: Int, newSettings: OnlineSettings): String? {
         if (by != hostId) return "Only the host can change the settings."
         if (phase != Phase.LOBBY && phase != Phase.RESULTS) return "Settings can only be changed between rounds."
-        settings = newSettings.sanitized()
+        val known = repository.packs.map { it.name }.toSet()
+        val disabled = newSettings.disabledPacks.filter { it in known }.toSet()
+        settings = newSettings.sanitized().copy(disabledPacks = disabled)
         return null
     }
 
@@ -132,9 +134,10 @@ class GameEngine(
         players.values.filter { !it.connected }.map { it.id }.forEach { players.remove(it) }
         val participants = players.keys.toList()
         if (participants.size < Rules.MIN_PLAYERS) return "At least ${Rules.MIN_PLAYERS} players are needed."
+        if (repository.packs.all { it.name in settings.disabledPacks }) return "Pick at least one topic pack."
 
         val impostorCount = settings.impostors.coerceIn(1, Rules.maxChameleons(participants.size))
-        val matrix = repository.deal(settings.matrixSize, random, recentCategories.toSet())
+        val matrix = repository.deal(settings.matrixSize, random, recentCategories.toSet(), settings.disabledPacks)
         recentCategories.addLast(matrix.category)
         while (recentCategories.size > RECENT_CATEGORY_MEMORY) recentCategories.removeFirst()
 
@@ -232,6 +235,7 @@ class GameEngine(
             phase = phase,
             players = players.values.map { PlayerInfo(it.id, it.name, it.connected, it.id == hostId, it.score) },
             settings = settings,
+            packs = if (phase == Phase.LOBBY || phase == Phase.RESULTS) repository.packs else emptyList(),
         )
         if (r == null) return base
         val participant = id in r.participants

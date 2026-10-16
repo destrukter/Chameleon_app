@@ -47,10 +47,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.destrukter.chameleon.AppViewModel
 import com.destrukter.chameleon.core.MatrixSize
+import com.destrukter.chameleon.core.PackInfo
 import com.destrukter.chameleon.core.Rules
 
 @Composable
-fun LocalSetupScreen(local: AppViewModel.LocalController, onBack: () -> Unit) {
+fun LocalSetupScreen(local: AppViewModel.LocalController, packs: List<PackInfo>, onBack: () -> Unit) {
     var input by rememberSaveable { mutableStateOf("") }
     val playerCount = local.names.size
     val maxChameleons = Rules.maxChameleons(maxOf(playerCount, Rules.MIN_PLAYERS))
@@ -89,7 +90,6 @@ fun LocalSetupScreen(local: AppViewModel.LocalController, onBack: () -> Unit) {
                         Icon(Icons.Default.Add, contentDescription = "Add player")
                     }
                 }
-                local.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                 if (local.names.isEmpty()) {
                     Text(
                         "Add everybody who is playing. You need at least ${Rules.MIN_PLAYERS}.",
@@ -144,6 +144,19 @@ fun LocalSetupScreen(local: AppViewModel.LocalController, onBack: () -> Unit) {
                 )
             }
 
+            if (packs.isNotEmpty()) {
+                SectionCard(title = "Topic packs") {
+                    PackSelector(
+                        packs = packs,
+                        disabled = local.disabledPacks,
+                        enabled = true,
+                        onToggle = local::togglePack,
+                        onSetAll = local::setAllPacks,
+                    )
+                }
+            }
+
+            local.error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) }
             Button(
                 onClick = { local.start() },
                 modifier = Modifier.fillMaxWidth().height(56.dp),

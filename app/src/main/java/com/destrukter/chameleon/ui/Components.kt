@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 
 package com.destrukter.chameleon.ui
 
@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,6 +22,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.destrukter.chameleon.core.MatrixSize
+import com.destrukter.chameleon.core.PackInfo
 import com.destrukter.chameleon.core.WordMatrix
 import kotlinx.coroutines.delay
 
@@ -202,6 +207,42 @@ fun <T> SegmentedChoice(
             ) {
                 Text(label(option), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+        }
+    }
+}
+
+/** Chips for switching topic packs on and off, with "All" / "None" shortcuts for whoever may edit them. */
+@Composable
+fun PackSelector(
+    packs: List<PackInfo>,
+    disabled: Set<String>,
+    enabled: Boolean,
+    onToggle: (String) -> Unit,
+    onSetAll: ((Boolean) -> Unit)? = null,
+) {
+    val activeCount = packs.count { it.name !in disabled }
+    val topics = packs.filter { it.name !in disabled }.sumOf { it.topicCount }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Text(
+            if (activeCount == 0) "Pick at least one pack" else "$activeCount of ${packs.size} packs · $topics topics",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (activeCount == 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        if (enabled && onSetAll != null) {
+            TextButton(onClick = { onSetAll(true) }) { Text("All") }
+            TextButton(onClick = { onSetAll(false) }) { Text("None") }
+        }
+    }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        packs.forEach { pack ->
+            val on = pack.name !in disabled
+            FilterChip(
+                selected = on,
+                onClick = { onToggle(pack.name) },
+                enabled = enabled,
+                label = { Text("${pack.name} (${pack.topicCount})") },
+            )
         }
     }
 }

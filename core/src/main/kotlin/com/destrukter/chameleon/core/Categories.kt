@@ -13,8 +13,12 @@ enum class MatrixSize(val dimension: Int, val label: String) {
     val cellCount: Int get() = dimension * dimension
 }
 
-/** A topic with enough words to fill the largest matrix. */
-data class Category(val name: String, val words: List<String>)
+/** A topic with enough words to fill the largest matrix. [pack] is the themed deck it belongs to. */
+data class Category(val name: String, val words: List<String>, val pack: String = CategoryRepository.DEFAULT_PACK)
+
+/** A themed deck of topics that players can switch on or off. */
+@Serializable
+data class PackInfo(val name: String, val topicCount: Int)
 
 /** A dealt topic card: [words] are laid out row by row in a [size] grid. */
 @Serializable
@@ -41,13 +45,29 @@ class CategoryRepository(val categories: List<Category>) {
         require(categories.isNotEmpty()) { "No categories loaded" }
     }
 
+    /** The packs in file order, with how many topics each holds. */
+    val packs: List<PackInfo> = categories.groupBy { it.pack }.map { (name, topics) -> PackInfo(name, topics.size) }
+
+    /** Packs that would remain after switching off [disabledPacks]; all packs if that would leave none. */
+    fun enabledPacks(disabledPacks: Set<String>): Set<String> {
+        val enabled = packs.map { it.name }.filter { it !in disabledPacks }.toSet()
+        return enabled.ifEmpty { packs.map { it.name }.toSet() }
+    }
+
     /**
      * Draws a random category and a random selection of its words for the given size.
-     * [exclude] lets callers avoid immediately re-dealing a category the group just rejected.
+     * Topics from [disabledPacks] are skipped, and [exclude] lets callers avoid immediately re-dealing a
+     * category the group just rejected. Both filters are relaxed when they would leave nothing to deal.
      */
-    fun deal(size: MatrixSize, random: Random, exclude: Set<String> = emptySet()): WordMatrix {
-        val pool = categories.filter { it.name !in exclude && it.words.size >= size.cellCount }
-            .ifEmpty { categories.filter { it.words.size >= size.cellCount } }
+    fun deal(
+        size: MatrixSize,
+        random: Random,
+        exclude: Set<String> = emptySet(),
+        disabledPacks: Set<String> = emptySet(),
+    ): WordMatrix {
+        val packs = enabledPacks(disabledPacks)
+        val playable = categories.filter { it.pack in packs && it.words.size >= size.cellCount }
+        val pool = playable.filter { it.name !in exclude }.ifEmpty { playable }
         val category = pool.random(random)
         val words = category.words.shuffled(random).take(size.cellCount)
         return WordMatrix(category.name, size, words)
@@ -56,18 +76,27 @@ class CategoryRepository(val categories: List<Category>) {
     companion object {
         const val RESOURCE = "/categories.txt"
         const val WORDS_PER_CATEGORY = 36
+        const val DEFAULT_PACK = "General"
 
-        /** Parses lines of the form `Category|word1,word2,...`. Blank lines and `#` comments are skipped. */
+        /**
+         * Parses lines of the form `Category|word1,word2,...`. A `[Pack name]` line puts the following
+         * categories into that pack. Blank lines and `#` comments are skipped.
+         */
         fun parse(text: String): CategoryRepository {
-            val categories = text.lineSequence()
-                .map { it.trim() }
-                .filter { it.isNotEmpty() && !it.startsWith("#") }
-                .map { line ->
-                    val name = line.substringBefore('|').trim()
-                    val words = line.substringAfter('|').split(',').map { it.trim() }.filter { it.isNotEmpty() }
-                    Category(name, words)
+            var pack = DEFAULT_PACK
+            val categories = mutableListOf<Category>()
+            for (raw in text.lineSequence()) {
+                val line = raw.trim()
+                when {
+                    line.isEmpty() || line.startsWith("#") -> Unit
+                    line.startsWith("[") && line.endsWith("]") -> pack = line.substring(1, line.length - 1).trim()
+                    else -> {
+                        val name = line.substringBefore('|').trim()
+                        val words = line.substringAfter('|').split(',').map { it.trim() }.filter { it.isNotEmpty() }
+                        categories += Category(name, words, pack)
+                    }
                 }
-                .toList()
+            }
             return CategoryRepository(categories)
         }
 

@@ -206,4 +206,16 @@ class GameEngineTest {
         val outcome = engine.viewFor(ids[0]).outcomes.first()
         assertEquals(p2, outcome.accusedId)
     }
+
+    @Test
+    fun hostChoosesTopicPacks() {
+        val ids = joinAll("Anna", "Ben", "Cleo")
+        assertEquals(listOf("Gaming", "Other"), engine.viewFor(ids[1]).packs.map { it.name })
+        assertNull(engine.updateSettings(ids[0], OnlineSettings(disabledPacks = setOf("Gaming", "Other"))))
+        assertNotNull("no packs left", engine.start(ids[0]))
+        assertNull(engine.updateSettings(ids[0], OnlineSettings(disabledPacks = setOf("Other", "Unknown"))))
+        assertEquals(setOf("Other"), engine.settings.disabledPacks)
+        assertNull(engine.start(ids[0]))
+        assertEquals("Topic 1", engine.viewFor(ids[0]).matrix!!.category)
+    }
 }

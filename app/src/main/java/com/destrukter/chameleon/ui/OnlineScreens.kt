@@ -374,6 +374,22 @@ private fun SettingsCard(view: GameView, online: AppViewModel.OnlineController) 
             enabled = editable,
         )
         HorizontalDivider()
+        if (view.packs.isNotEmpty()) {
+            Text("Topic packs", style = MaterialTheme.typography.bodyLarge)
+            val disabled = settings.disabledPacks
+            PackSelector(
+                packs = view.packs,
+                disabled = disabled,
+                enabled = editable,
+                onToggle = { pack ->
+                    update(settings.copy(disabledPacks = if (pack in disabled) disabled - pack else disabled + pack))
+                },
+                onSetAll = { all ->
+                    update(settings.copy(disabledPacks = if (all) emptySet() else view.packs.map { it.name }.toSet()))
+                },
+            )
+            HorizontalDivider()
+        }
         Text("Time to give a word", style = MaterialTheme.typography.bodyLarge)
         SecondsChips(OnlineSettings.TURN_OPTIONS, settings.turnSeconds, editable) { update(settings.copy(turnSeconds = it)) }
         Text("Time for each vote", style = MaterialTheme.typography.bodyLarge)

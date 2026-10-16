@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.destrukter.chameleon.core.CategoryRepository
 import com.destrukter.chameleon.core.LocalRound
 import com.destrukter.chameleon.core.MatrixSize
+import com.destrukter.chameleon.core.PackInfo
 import com.destrukter.chameleon.core.Rules
 import com.destrukter.chameleon.core.WordMatrix
 import com.destrukter.chameleon.core.online.ClientMessage
@@ -40,17 +41,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var screen by mutableStateOf(Screen.Menu)
         private set
 
+    /** Topic packs of the bundled word list, available once it has been loaded. */
+    var packs by mutableStateOf<List<PackInfo>>(emptyList())
+        private set
+
     val local = LocalController()
     val online = OnlineController()
 
     init {
         viewModelScope.launch {
-            repository = withContext(Dispatchers.IO) { CategoryRepository.loadBundled() }
+            repo()
         }
     }
 
     private suspend fun repo(): CategoryRepository =
-        repository ?: withContext(Dispatchers.IO) { CategoryRepository.loadBundled() }.also { repository = it }
+        repository ?: withContext(Dispatchers.IO) { CategoryRepository.loadBundled() }.also {
+            repository = it
+            packs = it.packs
+        }
 
     fun navigate(target: Screen) {
         screen = target
@@ -85,6 +93,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         var size by mutableStateOf(
             runCatching { MatrixSize.valueOf(prefs.getString(KEY_LOCAL_SIZE, null) ?: "") }.getOrDefault(MatrixSize.SMALL)
         )
+            private set
+        /** Packs switched off for the local game; new packs added in an update start switched on. */
+        var disabledPacks by mutableStateOf(prefs.getStringSet(KEY_LOCAL_DISABLED_PACKS, null).orEmpty().toSet())
             private set
         var error by mutableStateOf<String?>(null)
             private set
@@ -131,17 +142,35 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             prefs.edit().putString(KEY_LOCAL_SIZE, value.name).apply()
         }
 
+        fun togglePack(pack: String) {
+            savePacks(if (pack in disabledPacks) disabledPacks - pack else disabledPacks + pack)
+        }
+
+        fun setAllPacks(enabled: Boolean) {
+            savePacks(if (enabled) emptySet() else packs.map { it.name }.toSet())
+        }
+
+        private fun savePacks(updated: Set<String>) {
+            disabledPacks = updated
+            error = null
+            prefs.edit().putStringSet(KEY_LOCAL_DISABLED_PACKS, updated).apply()
+        }
+
         /** Counts the entered names and moves on to picking a topic. */
         fun start() {
             if (names.size < Rules.MIN_PLAYERS) {
                 error = "Add at least ${Rules.MIN_PLAYERS} players (you have ${names.size})."
                 return
             }
+            if (packs.isNotEmpty() && packs.all { it.name in disabledPacks }) {
+                error = "Pick at least one topic pack."
+                return
+            }
             error = null
             updateChameleons(chameleons)
             rejectedCategories.clear()
             viewModelScope.launch {
-                matrix = repo().deal(size, random)
+                matrix = repo().deal(size, random, disabledPacks = disabledPacks)
                 screen = Screen.LocalCategory
             }
         }
@@ -149,7 +178,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         fun reshuffle() {
             val current = matrix ?: return
             rejectedCategories += current.category
-            viewModelScope.launch { matrix = repo().deal(size, random, rejectedCategories) }
+            viewModelScope.launch { matrix = repo().deal(size, random, rejectedCategories, disabledPacks) }
         }
 
         fun accept() {
@@ -283,6 +312,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         const val KEY_NAMES = "local_names"
         const val KEY_LOCAL_CHAMELEONS = "local_chameleons"
         const val KEY_LOCAL_SIZE = "local_size"
+        const val KEY_LOCAL_DISABLED_PACKS = "local_disabled_packs"
         const val KEY_ONLINE_NAME = "online_name"
         const val KEY_LAST_CODE = "last_code"
     }
