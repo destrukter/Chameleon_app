@@ -9,6 +9,11 @@ the chameleon, who has to bluff a clue that blends in. The app adds what the 3â€
 - **500 topic cards**, each with 36 words (`core/src/main/resources/categories.txt`). Smaller boards use a
   random subset of a topic's words, so the same topic plays differently each time.
 
+## Install
+
+Download [`apk/chameleon.apk`](apk/chameleon.apk) to your phone and open it (allow installing from unknown
+sources when asked). CI rebuilds and commits this file on every push.
+
 ## Local game (pass & play)
 
 1. Type in everybody's names. The game counts them when you press *Start*. Pick the number of chameleons
