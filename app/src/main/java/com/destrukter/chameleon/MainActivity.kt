@@ -8,6 +8,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.destrukter.chameleon.ui.ChameleonTheme
+import com.destrukter.chameleon.ui.CustomBoardEditorScreen
+import com.destrukter.chameleon.ui.CustomBoardsScreen
 import com.destrukter.chameleon.ui.LocalCategoryScreen
 import com.destrukter.chameleon.ui.LocalOverviewScreen
 import com.destrukter.chameleon.ui.LocalPassScreen
@@ -39,6 +41,7 @@ private fun ChameleonApp(onExit: () -> Unit, vm: AppViewModel = viewModel()) {
         Screen.Menu -> MenuScreen(
             onLocal = { vm.navigate(Screen.LocalSetup) },
             onOnline = { vm.navigate(Screen.OnlineHome) },
+            onCustom = { vm.navigate(Screen.CustomBoards) },
             onRules = { vm.navigate(Screen.Rules) },
         )
         Screen.Rules -> RulesScreen(onBack = back)
@@ -48,5 +51,7 @@ private fun ChameleonApp(onExit: () -> Unit, vm: AppViewModel = viewModel()) {
         Screen.LocalOverview -> LocalOverviewScreen(vm.local, onMenu = { vm.navigate(Screen.Menu) })
         Screen.OnlineHome -> OnlineHomeScreen(vm.online, onBack = back)
         Screen.OnlineSession -> OnlineSessionScreen(vm.online)
+        Screen.CustomBoards -> CustomBoardsScreen(vm.customBoards, vm.editor, onBack = back)
+        Screen.CustomBoardEditor -> CustomBoardEditorScreen(vm.editor, onBack = back)
     }
 }

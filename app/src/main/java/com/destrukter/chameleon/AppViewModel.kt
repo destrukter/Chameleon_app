@@ -10,6 +10,8 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.destrukter.chameleon.core.CategoryRepository
+import com.destrukter.chameleon.core.CustomBoard
+import com.destrukter.chameleon.core.CustomBoardStore
 import com.destrukter.chameleon.core.LocalRound
 import com.destrukter.chameleon.core.MatrixSize
 import com.destrukter.chameleon.core.PackInfo
@@ -30,40 +32,53 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
 import kotlin.random.Random
 
 enum class Screen {
     Menu, Rules,
     LocalSetup, LocalCategory, LocalPass, LocalOverview,
     OnlineHome, OnlineSession,
+    CustomBoards, CustomBoardEditor,
 }
 
 class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private val prefs = application.getSharedPreferences("chameleon", Context.MODE_PRIVATE)
+    private val boardStore = CustomBoardStore(File(application.filesDir, "custom_boards.json"))
     private var repository: CategoryRepository? = null
 
     var screen by mutableStateOf(Screen.Menu)
         private set
 
-    /** Topic packs of the bundled word list, available once it has been loaded. */
+    /** Topic packs of the bundled word list plus the "Custom" pack, available once loaded. */
     var packs by mutableStateOf<List<PackInfo>>(emptyList())
+        private set
+
+    /** The boards this player designed. Only the host's own boards are used in multiplayer. */
+    var customBoards by mutableStateOf<List<CustomBoard>>(emptyList())
         private set
 
     val local = LocalController()
     val online = OnlineController()
+    val editor = BoardEditor()
 
     init {
         viewModelScope.launch {
-            repo()
+            customBoards = withContext(Dispatchers.IO) { boardStore.load() }
+            refreshPacks()
         }
     }
 
-    private suspend fun repo(): CategoryRepository =
-        repository ?: withContext(Dispatchers.IO) { CategoryRepository.loadBundled() }.also {
-            repository = it
-            packs = it.packs
-        }
+    private suspend fun bundled(): CategoryRepository =
+        repository ?: withContext(Dispatchers.IO) { CategoryRepository.loadBundled() }.also { repository = it }
+
+    /** The bundled topics plus this player's custom boards. */
+    private suspend fun repo(): CategoryRepository = CategoryRepository.withCustomBoards(bundled(), customBoards)
+
+    private suspend fun refreshPacks() {
+        packs = repo().packs
+    }
 
     fun navigate(target: Screen) {
         screen = target
@@ -73,7 +88,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     fun back(): Boolean {
         screen = when (screen) {
             Screen.Menu -> return false
-            Screen.Rules, Screen.LocalSetup, Screen.OnlineHome -> Screen.Menu
+            Screen.Rules, Screen.LocalSetup, Screen.OnlineHome, Screen.CustomBoards -> Screen.Menu
+            Screen.CustomBoardEditor -> Screen.CustomBoards
             Screen.LocalCategory -> Screen.LocalSetup
             Screen.LocalPass, Screen.LocalOverview -> Screen.LocalSetup
             Screen.OnlineSession -> {
@@ -175,7 +191,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             updateChameleons(chameleons)
             rejectedCategories.clear()
             viewModelScope.launch {
-                matrix = repo().deal(size, random, disabledPacks = disabledPacks)
+                val repository = repo()
+                if (!repository.hasTopics(size, disabledPacks)) {
+                    error = "The selected packs have no ${size.dimension}×${size.dimension} boards."
+                    return@launch
+                }
+                matrix = repository.deal(size, random, disabledPacks = disabledPacks)
                 screen = Screen.LocalCategory
             }
         }
@@ -221,7 +242,6 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** Peer-to-peer play: one phone hosts the lobby, the others connect to it over the local network. */
     /** A code players can type to join, with where it works ("Over the internet", "Same Wi-Fi or hotspot", …). */
     data class ShareCode(val label: String, val code: String)
 
@@ -238,7 +258,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
      */
     inner class OnlineController {
         var name by mutableStateOf(prefs.getString(KEY_ONLINE_NAME, "").orEmpty())
-        var code by mutableStateOf(prefs.getString(KEY_LAST_CODE, "").orEmpty())
+        /** The typed lobby code without separators; the text field shows it grouped in blocks of four. */
+        var code by mutableStateOf(LobbyCode.normalize(prefs.getString(KEY_LAST_CODE, "").orEmpty()))
+            private set
+
+        fun updateCode(input: String) {
+            code = input.uppercase().filter { it.isLetterOrDigit() }.take(MAX_CODE_LENGTH)
+        }
         var error by mutableStateOf<String?>(null)
             private set
         var busy by mutableStateOf(false)
@@ -386,7 +412,83 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Creates, edits and deletes the player's custom boards. */
+    inner class BoardEditor {
+        var editingId by mutableStateOf<String?>(null)
+            private set
+        var name by mutableStateOf("")
+        var size by mutableStateOf(MatrixSize.SMALL)
+            private set
+        val words = mutableStateListOf<String>()
+        var error by mutableStateOf<String?>(null)
+            private set
+
+        fun create() {
+            editingId = null
+            name = ""
+            size = MatrixSize.SMALL
+            words.clear()
+            repeat(size.cellCount) { words += "" }
+            error = null
+            screen = Screen.CustomBoardEditor
+        }
+
+        fun edit(board: CustomBoard) {
+            editingId = board.id
+            name = board.name
+            size = board.size
+            words.clear()
+            words += board.words
+            error = null
+            screen = Screen.CustomBoardEditor
+        }
+
+        /** Changes the board size, keeping the words typed so far (extra ones are dropped from the end). */
+        fun changeSize(newSize: MatrixSize) {
+            val kept = words.toList().take(newSize.cellCount)
+            words.clear()
+            words += kept + List(newSize.cellCount - kept.size) { "" }
+            size = newSize
+            error = null
+        }
+
+        fun setWord(index: Int, value: String) {
+            if (index in words.indices) words[index] = value.take(CustomBoard.MAX_WORD_LENGTH)
+            error = null
+        }
+
+        fun save() {
+            val board = CustomBoard(id = editingId ?: java.util.UUID.randomUUID().toString(), name = name, size = size, words = words.toList())
+            val problem = board.problem()
+            if (problem != null) {
+                error = problem
+                return
+            }
+            val cleaned = board.cleaned()
+            if (customBoards.any { it.id != cleaned.id && it.name.equals(cleaned.name, ignoreCase = true) }) {
+                error = "You already have a board called \"${cleaned.name}\"."
+                return
+            }
+            persist(customBoards.filter { it.id != cleaned.id } + cleaned)
+            screen = Screen.CustomBoards
+        }
+
+        fun delete(board: CustomBoard) {
+            persist(customBoards.filter { it.id != board.id })
+            if (editingId == board.id) screen = Screen.CustomBoards
+        }
+
+        private fun persist(boards: List<CustomBoard>) {
+            customBoards = boards.sortedWith(compareBy({ it.size }, { it.name.lowercase() }))
+            viewModelScope.launch {
+                withContext(Dispatchers.IO) { boardStore.save(customBoards) }
+                refreshPacks()
+            }
+        }
+    }
+
     private companion object {
+        const val MAX_CODE_LENGTH = 12
         const val KEY_NAMES = "local_names"
         const val KEY_LOCAL_CHAMELEONS = "local_chameleons"
         const val KEY_LOCAL_SIZE = "local_size"

@@ -23,6 +23,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.filled.Create
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Share
@@ -67,7 +73,6 @@ import com.destrukter.chameleon.core.Rules
 import com.destrukter.chameleon.core.online.ClientMessage
 import com.destrukter.chameleon.core.online.GameClient
 import com.destrukter.chameleon.core.online.GameView
-import com.destrukter.chameleon.core.online.LobbyCode
 import com.destrukter.chameleon.core.online.OnlineSettings
 import com.destrukter.chameleon.core.online.Phase
 import com.destrukter.chameleon.core.online.Protocol
@@ -85,7 +90,7 @@ fun OnlineHomeScreen(online: AppViewModel.OnlineController, onBack: () -> Unit) 
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            SectionCard(title = "Your name") {
+            SectionCard(title = "Your name", icon = Icons.Default.Person) {
                 OutlinedTextField(
                     value = online.name,
                     onValueChange = { online.name = it.take(Protocol.MAX_NAME_LENGTH) },
@@ -95,7 +100,7 @@ fun OnlineHomeScreen(online: AppViewModel.OnlineController, onBack: () -> Unit) 
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
                 )
             }
-            SectionCard(title = "Create a lobby") {
+            SectionCard(title = "Create a lobby", icon = Icons.Default.Home) {
                 Text(
                     "Your phone hosts the game. You'll get codes for friends on the same Wi-Fi and for friends anywhere else.",
                     style = MaterialTheme.typography.bodyMedium,
@@ -112,10 +117,11 @@ fun OnlineHomeScreen(online: AppViewModel.OnlineController, onBack: () -> Unit) 
                     }
                 }
             }
-            SectionCard(title = "Join a lobby") {
+            SectionCard(title = "Join a lobby", icon = Icons.Default.Search) {
                 OutlinedTextField(
                     value = online.code,
-                    onValueChange = { online.code = LobbyCode.format(it) },
+                    onValueChange = online::updateCode,
+                    visualTransformation = GroupedCodeTransformation,
                     label = { Text("Lobby code") },
                     placeholder = { Text("ABCD-EFGH") },
                     singleLine = true,
@@ -350,7 +356,7 @@ private fun LobbyContent(view: GameView, online: AppViewModel.OnlineController) 
 
 @Composable
 private fun PlayerList(view: GameView, showScores: Boolean = view.players.any { it.score > 0 }) {
-    SectionCard(title = "Players (${view.players.size})") {
+    SectionCard(title = "Players (${view.players.size})", icon = Icons.Default.Person) {
         view.players.sortedByDescending { if (showScores) it.score else 0 }.forEach { player ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -387,7 +393,7 @@ private fun SettingsCard(view: GameView, online: AppViewModel.OnlineController) 
     fun update(new: OnlineSettings) = online.send(ClientMessage.UpdateSettings(new))
     val maxImpostors = Rules.maxChameleons(maxOf(view.players.size, Rules.MIN_PLAYERS))
 
-    SectionCard(title = if (editable) "Settings" else "Settings (chosen by the host)") {
+    SectionCard(title = if (editable) "Settings" else "Settings (chosen by the host)", icon = Icons.Default.Settings) {
         Stepper(
             label = "Chameleons",
             value = settings.impostors,
@@ -419,6 +425,7 @@ private fun SettingsCard(view: GameView, online: AppViewModel.OnlineController) 
             PackSelector(
                 packs = view.packs,
                 disabled = disabled,
+                size = settings.matrixSize,
                 enabled = editable,
                 onToggle = { pack ->
                     update(settings.copy(disabledPacks = if (pack in disabled) disabled - pack else disabled + pack))
@@ -480,7 +487,7 @@ private fun RoleBanner(view: GameView) {
 
 @Composable
 private fun CluesList(view: GameView) {
-    SectionCard(title = "Words") {
+    SectionCard(title = "Words", icon = Icons.Default.Create) {
         view.turnOrder.forEachIndexed { index, id ->
             val clue = view.clues.getOrNull(index)
             val isCurrent = view.currentTurnId == id
@@ -602,7 +609,7 @@ private fun VotedMark(voted: Boolean) {
 @Composable
 private fun OutcomesCard(view: GameView) {
     if (view.outcomes.isEmpty()) return
-    SectionCard(title = "Votes so far") {
+    SectionCard(title = "Votes so far", icon = Icons.Default.ThumbUp) {
         view.outcomes.forEach { outcome ->
             val accused = outcome.accusedId
             Text(
@@ -700,7 +707,7 @@ private fun ResultsContent(view: GameView, online: AppViewModel.OnlineController
         selected = result.impostors.mapNotNull { it.guessIndex }.firstOrNull { it != result.secretIndex },
     )
     OutcomesCard(view)
-    SectionCard(title = "Scores") {
+    SectionCard(title = "Scores", icon = Icons.Default.Star) {
         view.players.sortedByDescending { it.score }.forEach { player ->
             val gained = result.pointsGained[player.id] ?: 0
             Row {

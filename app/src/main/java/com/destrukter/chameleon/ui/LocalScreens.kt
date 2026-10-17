@@ -17,6 +17,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
@@ -71,7 +74,7 @@ fun LocalSetupScreen(local: AppViewModel.LocalController, packs: List<PackInfo>,
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            SectionCard(title = "Players") {
+            SectionCard(title = "Players", icon = Icons.Default.Person) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = input,
@@ -112,7 +115,7 @@ fun LocalSetupScreen(local: AppViewModel.LocalController, packs: List<PackInfo>,
                 }
             }
 
-            SectionCard(title = "Settings") {
+            SectionCard(title = "Settings", icon = Icons.Default.Settings) {
                 Stepper(
                     label = "Chameleons",
                     value = local.chameleons.coerceAtMost(maxChameleons),
@@ -145,10 +148,11 @@ fun LocalSetupScreen(local: AppViewModel.LocalController, packs: List<PackInfo>,
             }
 
             if (packs.isNotEmpty()) {
-                SectionCard(title = "Topic packs") {
+                SectionCard(title = "Topic packs", icon = Icons.Default.Star) {
                     PackSelector(
                         packs = packs,
                         disabled = local.disabledPacks,
+                        size = local.size,
                         enabled = true,
                         onToggle = local::togglePack,
                         onSetAll = local::setAllPacks,

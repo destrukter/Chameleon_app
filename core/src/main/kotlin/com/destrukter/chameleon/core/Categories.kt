@@ -13,12 +13,29 @@ enum class MatrixSize(val dimension: Int, val label: String) {
     val cellCount: Int get() = dimension * dimension
 }
 
-/** A topic with enough words to fill the largest matrix. [pack] is the themed deck it belongs to. */
-data class Category(val name: String, val words: List<String>, val pack: String = CategoryRepository.DEFAULT_PACK)
+/**
+ * A topic. Bundled topics hold enough words for the largest board and smaller boards use a random subset.
+ * A custom board has [fixedSize] set: it only fits that board size and keeps its words in the order laid out.
+ */
+data class Category(
+    val name: String,
+    val words: List<String>,
+    val pack: String = CategoryRepository.DEFAULT_PACK,
+    val fixedSize: MatrixSize? = null,
+) {
+    fun fits(size: MatrixSize): Boolean =
+        if (fixedSize != null) fixedSize == size && words.size == size.cellCount else words.size >= size.cellCount
+}
 
-/** A themed deck of topics that players can switch on or off. */
+/** A themed deck of topics that players can switch on or off. [sizeCounts] says how many topics fit each board size. */
 @Serializable
-data class PackInfo(val name: String, val topicCount: Int)
+data class PackInfo(
+    val name: String,
+    val topicCount: Int,
+    val sizeCounts: Map<MatrixSize, Int> = emptyMap(),
+) {
+    fun countFor(size: MatrixSize): Int = sizeCounts[size] ?: topicCount
+}
 
 /** A dealt topic card: [words] are laid out row by row in a [size] grid. */
 @Serializable
@@ -46,7 +63,13 @@ class CategoryRepository(val categories: List<Category>) {
     }
 
     /** The packs in file order, with how many topics each holds. */
-    val packs: List<PackInfo> = categories.groupBy { it.pack }.map { (name, topics) -> PackInfo(name, topics.size) }
+    val packs: List<PackInfo> = categories.groupBy { it.pack }.map { (name, topics) ->
+        PackInfo(name, topics.size, MatrixSize.entries.associateWith { size -> topics.count { it.fits(size) } })
+    }
+
+    /** Whether the enabled packs hold at least one topic for this board size. */
+    fun hasTopics(size: MatrixSize, disabledPacks: Set<String>): Boolean =
+        categories.any { it.pack !in disabledPacks && it.fits(size) }
 
     /** Packs that would remain after switching off [disabledPacks]; all packs if that would leave none. */
     fun enabledPacks(disabledPacks: Set<String>): Set<String> {
@@ -57,7 +80,8 @@ class CategoryRepository(val categories: List<Category>) {
     /**
      * Draws a random category and a random selection of its words for the given size.
      * Topics from [disabledPacks] are skipped, and [exclude] lets callers avoid immediately re-dealing a
-     * category the group just rejected. Both filters are relaxed when they would leave nothing to deal.
+     * category the group just rejected. Both filters are relaxed when they would leave nothing to deal;
+     * callers check [hasTopics] first so a pack choice that fits no topic of this size is reported instead.
      */
     fun deal(
         size: MatrixSize,
@@ -66,10 +90,11 @@ class CategoryRepository(val categories: List<Category>) {
         disabledPacks: Set<String> = emptySet(),
     ): WordMatrix {
         val packs = enabledPacks(disabledPacks)
-        val playable = categories.filter { it.pack in packs && it.words.size >= size.cellCount }
+        val playable = categories.filter { it.pack in packs && it.fits(size) }
+            .ifEmpty { categories.filter { it.fits(size) } }
         val pool = playable.filter { it.name !in exclude }.ifEmpty { playable }
         val category = pool.random(random)
-        val words = category.words.shuffled(random).take(size.cellCount)
+        val words = if (category.fixedSize != null) category.words else category.words.shuffled(random).take(size.cellCount)
         return WordMatrix(category.name, size, words)
     }
 
@@ -77,6 +102,7 @@ class CategoryRepository(val categories: List<Category>) {
         const val RESOURCE = "/categories.txt"
         const val WORDS_PER_CATEGORY = 36
         const val DEFAULT_PACK = "General"
+        const val CUSTOM_PACK = "Custom"
 
         /**
          * Parses lines of the form `Category|word1,word2,...`. A `[Pack name]` line puts the following
@@ -99,6 +125,14 @@ class CategoryRepository(val categories: List<Category>) {
             }
             return CategoryRepository(categories)
         }
+
+        /** A copy of [base] with the player's own boards added as the [CUSTOM_PACK] pack. */
+        fun withCustomBoards(base: CategoryRepository, boards: List<CustomBoard>): CategoryRepository =
+            if (boards.isEmpty()) {
+                base
+            } else {
+                CategoryRepository(base.categories + boards.map { Category(it.name, it.words, CUSTOM_PACK, it.size) })
+            }
 
         /** Loads the bundled word list shipped as a resource of this module. */
         fun loadBundled(): CategoryRepository {

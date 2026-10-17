@@ -13,6 +13,10 @@ the chameleon, who has to bluff a clue that blends in. The app adds what the 3�
   Fantasy, Myth & History, Science & Tech, Arts, Music & Fashion, Home & Everyday Life, Out and About, and
   Describe It ("Things that are red", "Things with wheels", …).
 
+- **Custom boards**: design your own 4×4, 5×5 or 6×6 boards (menu → *Custom boards*). They go into a "Custom"
+  pack that can be selected only for games of a size you have boards for. In multiplayer the host's boards are
+  used, and the board drawn at the start is sent to every player with the rest of the game state.
+
 ## Install
 
 Download [`apk/chameleon.apk`](apk/chameleon.apk) to your phone and open it (allow installing from unknown

@@ -44,7 +44,7 @@ class CategoriesTest {
             Fruit|f
             """.trimIndent()
         )
-        assertEquals(listOf(PackInfo("General", 1), PackInfo("Gaming", 2), PackInfo("Food", 1)), repo.packs)
+        assertEquals(listOf("General" to 1, "Gaming" to 2, "Food" to 1), repo.packs.map { it.name to it.topicCount })
         assertEquals("Gaming", repo.categories.single { it.name == "Arcade" }.pack)
     }
 

@@ -135,6 +135,9 @@ class GameEngine(
         val participants = players.keys.toList()
         if (participants.size < Rules.MIN_ONLINE_PLAYERS) return "At least ${Rules.MIN_ONLINE_PLAYERS} players are needed."
         if (repository.packs.all { it.name in settings.disabledPacks }) return "Pick at least one topic pack."
+        if (!repository.hasTopics(settings.matrixSize, settings.disabledPacks)) {
+            return "The selected packs have no ${settings.matrixSize.dimension}×${settings.matrixSize.dimension} boards."
+        }
 
         val impostorCount = settings.impostors.coerceIn(1, Rules.maxChameleons(participants.size))
         val matrix = repository.deal(settings.matrixSize, random, recentCategories.toSet(), settings.disabledPacks)

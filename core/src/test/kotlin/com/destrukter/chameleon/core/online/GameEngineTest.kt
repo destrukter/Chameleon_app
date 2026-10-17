@@ -1,5 +1,7 @@
 package com.destrukter.chameleon.core.online
 
+import com.destrukter.chameleon.core.CategoryRepository
+import com.destrukter.chameleon.core.CustomBoard
 import com.destrukter.chameleon.core.MatrixSize
 import com.destrukter.chameleon.core.testRepository
 import org.junit.Assert.assertEquals
@@ -233,5 +235,26 @@ class GameEngineTest {
         assertEquals(setOf("Other"), engine.settings.disabledPacks)
         assertNull(engine.start(ids[0]))
         assertEquals("Topic 1", engine.viewFor(ids[0]).matrix!!.category)
+    }
+
+    @Test
+    fun hostCustomBoardIsSentToEveryPlayer() {
+        val custom = CustomBoard(name = "Our Inside Jokes", size = MatrixSize.SMALL, words = (1..16).map { "Joke $it" })
+        val repo = CategoryRepository.withCustomBoards(testRepository(), listOf(custom))
+        val engine = GameEngine(repo, Random(5)) { now }
+        val ids = listOf("Anna", "Ben", "Cleo").map { (engine.join(it) as GameEngine.JoinResult.Accepted).playerId }
+        val onlyCustom = repo.packs.map { it.name }.filter { it != CategoryRepository.CUSTOM_PACK }.toSet()
+
+        // The Custom pack has no 5x5 board, so a 5x5 game with only that pack cannot start.
+        assertNull(engine.updateSettings(ids[0], OnlineSettings(matrixSize = MatrixSize.MEDIUM, disabledPacks = onlyCustom)))
+        assertNotNull(engine.start(ids[0]))
+
+        assertNull(engine.updateSettings(ids[0], OnlineSettings(matrixSize = MatrixSize.SMALL, disabledPacks = onlyCustom)))
+        assertNull(engine.start(ids[0]))
+        ids.forEach { id ->
+            val matrix = engine.viewFor(id).matrix!!
+            assertEquals("Our Inside Jokes", matrix.category)
+            assertEquals(custom.words, matrix.words)
+        }
     }
 }
