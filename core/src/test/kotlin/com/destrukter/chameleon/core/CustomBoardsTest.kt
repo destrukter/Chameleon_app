@@ -25,15 +25,75 @@ class CustomBoardsTest {
     }
 
     @Test
-    fun storeRoundTrips() {
+    fun storeRoundTripsAndReadsTheOldFormat() {
         val file = Files.createTempDirectory("boards").resolve("custom.json").toFile()
         val store = CustomBoardStore(file)
-        assertEquals(emptyList<CustomBoard>(), store.load())
-        val boards = listOf(board("A", MatrixSize.SMALL), board("B", MatrixSize.LARGE))
-        store.save(boards)
-        assertEquals(boards, store.load())
+        assertEquals(CustomLibrary(), store.load())
+        val library = CustomLibrary(listOf("Custom", "Family"), listOf(board("A", MatrixSize.SMALL), board("B", MatrixSize.LARGE).copy(category = "Family")))
+        store.save(library)
+        assertEquals(library, store.load())
+        // The first release saved a bare list of boards.
+        file.writeText("""[{"id":"x","name":"Old","size":"SMALL","words":${(1..16).map { "\"w$it\"" }}}]""")
+        val old = store.load()
+        assertEquals("Old", old.boards.single().name)
+        assertEquals("Custom", old.boards.single().category)
         file.writeText("not json")
-        assertEquals(emptyList<CustomBoard>(), store.load())
+        assertEquals(CustomLibrary(), store.load())
+    }
+
+    @Test
+    fun categoriesBecomePacksAndMoveBoards() {
+        val reserved = testRepository().packs.map { it.name }
+        var library = CustomLibrary()
+        assertNotNull(library.categoryNameProblem("gaming", reserved))
+        assertNotNull(library.categoryNameProblem("custom", reserved))
+        assertNull(library.categoryNameProblem("Family", reserved))
+        library = library.addCategory("Family")
+            .copy(boards = listOf(board("Cousins", MatrixSize.SMALL).copy(category = "Family"), board("Misc", MatrixSize.SMALL)))
+        val repo = CategoryRepository.withCustomBoards(testRepository(), library.boards)
+        assertEquals(1, repo.packs.single { it.name == "Family" }.countFor(MatrixSize.SMALL))
+
+        library = library.renameCategory("Family", "Relatives")
+        assertEquals("Relatives", library.boards.first { it.name == "Cousins" }.category)
+        library = library.deleteCategory("Relatives")
+        assertEquals(listOf("Custom"), library.allCategories())
+        assertEquals(setOf("Custom"), library.boards.map { it.category }.toSet())
+    }
+
+    @Test
+    fun exportImportRoundTrip() {
+        val mine = CustomLibrary(
+            listOf("Custom", "Family", "Work"),
+            listOf(board("Cousins", MatrixSize.SMALL).copy(category = "Family"), board("Office", MatrixSize.MEDIUM).copy(category = "Work")),
+        )
+        val shared = CustomLibraryCodec.decode(CustomLibraryCodec.encode(mine.only(listOf("Family"))))
+        assertEquals(listOf("Family"), shared.categories)
+        assertEquals(listOf("Cousins"), shared.boards.map { it.name })
+
+        // A friend already has a different "Cousins" board in "Family" and a pack clashing with a built-in one.
+        val reserved = listOf("Gaming")
+        val friend = CustomLibrary(listOf("Custom", "Family"), listOf(board("Cousins", MatrixSize.SMALL, "other").copy(category = "Family")))
+        val incoming = shared.copy(
+            categories = shared.categories + "Gaming",
+            boards = shared.boards + board("Broken", MatrixSize.SMALL).copy(words = emptyList()) +
+                board("Retro", MatrixSize.SMALL).copy(category = "Gaming"),
+        )
+        val result = friend.merge(incoming, reserved)
+        assertEquals(2, result.addedBoards)
+        assertEquals(1, result.skipped)
+        assertEquals(setOf("Cousins", "Cousins (2)"), result.library.boardsIn("Family").map { it.name }.toSet())
+        assertEquals("Gaming (custom)", result.library.boards.single { it.name == "Retro" }.category)
+
+        // Importing the same file again replaces the boards instead of duplicating them.
+        val again = result.library.merge(incoming, reserved)
+        assertEquals(result.library.boards.size, again.library.boards.size)
+    }
+
+    @Test
+    fun rejectsForeignFiles() {
+        assertTrue(runCatching { CustomLibraryCodec.decode("{}") }.isFailure)
+        assertTrue(runCatching { CustomLibraryCodec.decode("""{"format":"other","version":1,"categories":[],"boards":[]}""") }.isFailure)
+        assertTrue(runCatching { CustomLibraryCodec.decode("""{"format":"chameleon-boards","version":99,"categories":[],"boards":[]}""") }.isFailure)
     }
 
     @Test

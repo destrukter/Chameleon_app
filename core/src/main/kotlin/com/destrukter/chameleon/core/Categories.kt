@@ -126,12 +126,12 @@ class CategoryRepository(val categories: List<Category>) {
             return CategoryRepository(categories)
         }
 
-        /** A copy of [base] with the player's own boards added as the [CUSTOM_PACK] pack. */
+        /** A copy of [base] with the player's own boards added, each category as its own pack. */
         fun withCustomBoards(base: CategoryRepository, boards: List<CustomBoard>): CategoryRepository =
             if (boards.isEmpty()) {
                 base
             } else {
-                CategoryRepository(base.categories + boards.map { Category(it.name, it.words, CUSTOM_PACK, it.size) })
+                CategoryRepository(base.categories + boards.map { Category(it.name, it.words, it.category, it.size) })
             }
 
         /** Loads the bundled word list shipped as a resource of this module. */

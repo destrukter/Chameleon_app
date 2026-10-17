@@ -116,4 +116,39 @@ class RelayTest {
         assertTrue((status as GameClient.Status.Disconnected).reason.contains("Could not find"))
         client.close()
     }
+
+    @Test
+    fun publicLobbiesAppearInTheBrowserAndPrivateOnesDoNot() = runBlocking<Unit> {
+        val browser = LobbyBrowser(brokers).also { it.start() }
+        val publicSession = HostSession(GameEngine(testRepository(), Random(1)))
+        val privateSession = HostSession(GameEngine(testRepository(), Random(2)))
+        val publicServer = HostServer.start(publicSession)
+        val publicRelay = RelayHost.start(publicSession, brokers, RelayHost.PublicSetup("Friday Games"))
+        val privateRelay = RelayHost.start(privateSession, brokers)
+        val host = GameClient(TcpClientTransport("127.0.0.1", publicServer.port), "Mia").also { it.connect() }
+        try {
+            val listing = withTimeout(20_000) { browser.lobbies.first { it.isNotEmpty() } }.single()
+            assertEquals("Friday Games", listing.name)
+            assertEquals("Mia", listing.hostName)
+            assertEquals(publicRelay.code, listing.code)
+            assertEquals(1, listing.players)
+
+            // Someone joins straight from the list.
+            val guest = GameClient(RelayClientTransport(listing.code, brokers), "Guest").also { it.connect() }
+            withTimeout(15_000) { guest.state.first { it.status == GameClient.Status.Connected } }
+            withTimeout(15_000) { browser.lobbies.first { l -> l.singleOrNull()?.players == 2 } }
+            guest.close()
+
+            assertTrue(browser.lobbies.value.none { it.code == privateRelay.code })
+            publicRelay.close()
+            withTimeout(15_000) { browser.lobbies.first { it.isEmpty() } }
+        } finally {
+            host.close()
+            browser.close()
+            privateRelay.close()
+            publicServer.close()
+            publicSession.close()
+            privateSession.close()
+        }
+    }
 }

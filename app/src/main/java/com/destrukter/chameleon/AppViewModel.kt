@@ -12,6 +12,8 @@ import androidx.lifecycle.viewModelScope
 import com.destrukter.chameleon.core.CategoryRepository
 import com.destrukter.chameleon.core.CustomBoard
 import com.destrukter.chameleon.core.CustomBoardStore
+import com.destrukter.chameleon.core.CustomLibrary
+import com.destrukter.chameleon.core.CustomLibraryCodec
 import com.destrukter.chameleon.core.LocalRound
 import com.destrukter.chameleon.core.MatrixSize
 import com.destrukter.chameleon.core.PackInfo
@@ -23,7 +25,10 @@ import com.destrukter.chameleon.core.online.GameClient
 import com.destrukter.chameleon.core.online.GameEngine
 import com.destrukter.chameleon.core.online.HostServer
 import com.destrukter.chameleon.core.online.HostSession
+import com.destrukter.chameleon.core.online.LobbyBrowser
 import com.destrukter.chameleon.core.online.LobbyCode
+import com.destrukter.chameleon.core.online.LobbyListing
+import com.destrukter.chameleon.core.online.PublicLobbies
 import com.destrukter.chameleon.core.online.RelayClientTransport
 import com.destrukter.chameleon.core.online.RelayHost
 import com.destrukter.chameleon.core.online.TcpClientTransport
@@ -38,7 +43,7 @@ import kotlin.random.Random
 enum class Screen {
     Menu, Rules,
     LocalSetup, LocalCategory, LocalPass, LocalOverview,
-    OnlineHome, OnlineSession,
+    OnlineHome, OnlineSession, LobbyBrowser,
     CustomBoards, CustomBoardEditor,
 }
 
@@ -55,9 +60,14 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     var packs by mutableStateOf<List<PackInfo>>(emptyList())
         private set
 
-    /** The boards this player designed. Only the host's own boards are used in multiplayer. */
-    var customBoards by mutableStateOf<List<CustomBoard>>(emptyList())
+    /** The player's own categories and boards. Only the host's own boards are used in multiplayer. */
+    var library by mutableStateOf(CustomLibrary())
         private set
+
+    val customBoards: List<CustomBoard> get() = library.boards
+
+    /** Names of the built-in packs, which custom categories may not reuse. */
+    private var builtInPacks: List<String> = emptyList()
 
     val local = LocalController()
     val online = OnlineController()
@@ -65,7 +75,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
-            customBoards = withContext(Dispatchers.IO) { boardStore.load() }
+            library = withContext(Dispatchers.IO) { boardStore.load() }
+            builtInPacks = bundled().packs.map { it.name }
             refreshPacks()
         }
     }
@@ -74,7 +85,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         repository ?: withContext(Dispatchers.IO) { CategoryRepository.loadBundled() }.also { repository = it }
 
     /** The bundled topics plus this player's custom boards. */
-    private suspend fun repo(): CategoryRepository = CategoryRepository.withCustomBoards(bundled(), customBoards)
+    private suspend fun repo(): CategoryRepository = CategoryRepository.withCustomBoards(bundled(), library.boards)
 
     private suspend fun refreshPacks() {
         packs = repo().packs
@@ -90,6 +101,10 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             Screen.Menu -> return false
             Screen.Rules, Screen.LocalSetup, Screen.OnlineHome, Screen.CustomBoards -> Screen.Menu
             Screen.CustomBoardEditor -> Screen.CustomBoards
+            Screen.LobbyBrowser -> {
+                online.stopBrowsing()
+                Screen.OnlineHome
+            }
             Screen.LocalCategory -> Screen.LocalSetup
             Screen.LocalPass, Screen.LocalOverview -> Screen.LocalSetup
             Screen.OnlineSession -> {
@@ -102,6 +117,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         online.leave()
+        online.stopBrowsing()
     }
 
     /** Pass-and-play on a single phone. */
@@ -277,6 +293,24 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         var client by mutableStateOf<GameClient?>(null)
             private set
 
+        /** Lobby creation options: a public lobby is listed in the lobby browser, a private one is code-only. */
+        var makePublic by mutableStateOf(prefs.getBoolean(KEY_PUBLIC, false))
+        var lobbyName by mutableStateOf(prefs.getString(KEY_LOBBY_NAME, "").orEmpty())
+
+        /** Whether the current lobby (as host) is in the public list. */
+        var hostingPublic by mutableStateOf(false)
+            private set
+
+        private var browser: LobbyBrowser? = null
+        private val noLobbies = MutableStateFlow<List<LobbyListing>>(emptyList())
+        private val noBrokers = MutableStateFlow(0)
+        var browsing by mutableStateOf(false)
+            private set
+        var browseStartedAt by mutableStateOf(0L)
+            private set
+        val publicLobbies: StateFlow<List<LobbyListing>> get() = browser?.lobbies ?: noLobbies
+        val reachableRelays: StateFlow<Int> get() = browser?.connectedBrokers ?: noBrokers
+
         private var session: HostSession? = null
         private var server: HostServer? = null
         private var relay: RelayHost? = null
@@ -288,6 +322,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
         fun host() {
             val player = validName() ?: return
+            if (makePublic && lobbyName.isBlank()) lobbyName = "$player's lobby"
+            prefs.edit().putBoolean(KEY_PUBLIC, makePublic).putString(KEY_LOBBY_NAME, lobbyName.trim()).apply()
+            hostingPublic = makePublic
             busy = true
             error = null
             viewModelScope.launch {
@@ -326,7 +363,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             if (relayStatus == RelayStatus.Connecting || relayStatus == RelayStatus.Ready) return
             relayStatus = RelayStatus.Connecting
             viewModelScope.launch {
-                val result = withContext(Dispatchers.IO) { runCatching { RelayHost.start(current) } }
+                val listing = if (hostingPublic) {
+                    RelayHost.PublicSetup(lobbyName.trim().take(PublicLobbies.MAX_NAME_LENGTH).ifEmpty { "Chameleon lobby" })
+                } else {
+                    null
+                }
+                val result = withContext(Dispatchers.IO) { runCatching { RelayHost.start(current, publicListing = listing) } }
                 if (session !== current) {
                     result.getOrNull()?.close()
                     return@launch
@@ -379,6 +421,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
             codes = emptyList()
             directCodes = emptyList()
             relayStatus = RelayStatus.Off
+            hostingPublic = false
             // Closing the relay waits for the broker, so keep it off the main thread. The client's goodbye goes first.
             if (oldRelay != null || oldServer != null || oldSession != null) {
                 Thread {
@@ -393,6 +436,30 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         fun leaveToHome() {
             leave()
             screen = Screen.OnlineHome
+        }
+
+        fun openBrowser() {
+            if (validName() == null) return
+            error = null
+            stopBrowsing()
+            browser = LobbyBrowser().also { it.start() }
+            browsing = true
+            browseStartedAt = System.currentTimeMillis()
+            screen = Screen.LobbyBrowser
+        }
+
+        fun stopBrowsing() {
+            browser?.close()
+            browser = null
+            browsing = false
+        }
+
+        fun joinListing(listing: LobbyListing) {
+            stopBrowsing()
+            updateCode(listing.code)
+            join()
+            // Joining failed validation (e.g. no name): stay on the multiplayer screen to show why.
+            if (screen != Screen.OnlineSession) screen = Screen.OnlineHome
         }
 
         private fun connect(transport: ClientTransport, player: String) {
@@ -419,13 +486,15 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         var name by mutableStateOf("")
         var size by mutableStateOf(MatrixSize.SMALL)
             private set
+        var category by mutableStateOf(CategoryRepository.CUSTOM_PACK)
         val words = mutableStateListOf<String>()
         var error by mutableStateOf<String?>(null)
             private set
 
-        fun create() {
+        fun create(inCategory: String = CategoryRepository.CUSTOM_PACK) {
             editingId = null
             name = ""
+            category = inCategory
             size = MatrixSize.SMALL
             words.clear()
             repeat(size.cellCount) { words += "" }
@@ -436,6 +505,7 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         fun edit(board: CustomBoard) {
             editingId = board.id
             name = board.name
+            category = board.category
             size = board.size
             words.clear()
             words += board.words
@@ -458,30 +528,75 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         fun save() {
-            val board = CustomBoard(id = editingId ?: java.util.UUID.randomUUID().toString(), name = name, size = size, words = words.toList())
+            val board = CustomBoard(
+                id = editingId ?: java.util.UUID.randomUUID().toString(),
+                name = name,
+                size = size,
+                words = words.toList(),
+                category = category,
+            )
             val problem = board.problem()
             if (problem != null) {
                 error = problem
                 return
             }
             val cleaned = board.cleaned()
-            if (customBoards.any { it.id != cleaned.id && it.name.equals(cleaned.name, ignoreCase = true) }) {
-                error = "You already have a board called \"${cleaned.name}\"."
+            val clash = customBoards.any {
+                it.id != cleaned.id && it.name.equals(cleaned.name, ignoreCase = true) && it.category.equals(cleaned.category, true)
+            }
+            if (clash) {
+                error = "\"${cleaned.category}\" already has a board called \"${cleaned.name}\"."
                 return
             }
-            persist(customBoards.filter { it.id != cleaned.id } + cleaned)
+            persist(library.copy(boards = customBoards.filter { it.id != cleaned.id } + cleaned))
             screen = Screen.CustomBoards
         }
 
         fun delete(board: CustomBoard) {
-            persist(customBoards.filter { it.id != board.id })
+            persist(library.copy(boards = customBoards.filter { it.id != board.id }))
             if (editingId == board.id) screen = Screen.CustomBoards
         }
 
-        private fun persist(boards: List<CustomBoard>) {
-            customBoards = boards.sortedWith(compareBy({ it.size }, { it.name.lowercase() }))
+        /** Returns an error message, or null when the category was added. */
+        fun addCategory(newName: String): String? {
+            library.categoryNameProblem(newName, builtInPacks)?.let { return it }
+            persist(library.addCategory(newName))
+            return null
+        }
+
+        fun renameCategory(from: String, to: String): String? {
+            if (from.equals(CategoryRepository.CUSTOM_PACK, ignoreCase = true)) return "The Custom category can't be renamed."
+            library.categoryNameProblem(to, builtInPacks, ignoring = from)?.let { return it }
+            persist(library.renameCategory(from, to))
+            return null
+        }
+
+        fun deleteCategory(name: String) {
+            if (!name.equals(CategoryRepository.CUSTOM_PACK, ignoreCase = true)) persist(library.deleteCategory(name))
+        }
+
+        /** The shareable file contents for the chosen categories. */
+        fun export(categories: Collection<String>): String = CustomLibraryCodec.encode(library.only(categories))
+
+        /** Imports a shared file and returns a message for the player. */
+        fun import(text: String): String = try {
+            val result = library.merge(CustomLibraryCodec.decode(text), builtInPacks)
+            persist(result.library)
+            buildString {
+                append("Imported ${result.addedBoards} board${if (result.addedBoards == 1) "" else "s"}")
+                if (result.addedCategories > 0) append(" and ${result.addedCategories} new categor${if (result.addedCategories == 1) "y" else "ies"}")
+                append(".")
+                if (result.skipped > 0) append(" ${result.skipped} incomplete board(s) were skipped.")
+            }
+        } catch (e: IllegalArgumentException) {
+            e.message ?: "Could not read that file."
+        }
+
+        private fun persist(updated: CustomLibrary) {
+            library = updated.copy(boards = updated.boards.sortedWith(compareBy({ it.size }, { it.name.lowercase() })))
+            val snapshot = library
             viewModelScope.launch {
-                withContext(Dispatchers.IO) { boardStore.save(customBoards) }
+                withContext(Dispatchers.IO) { boardStore.save(snapshot) }
                 refreshPacks()
             }
         }
@@ -489,6 +604,8 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
 
     private companion object {
         const val MAX_CODE_LENGTH = 12
+        const val KEY_PUBLIC = "lobby_public"
+        const val KEY_LOBBY_NAME = "lobby_name"
         const val KEY_NAMES = "local_names"
         const val KEY_LOCAL_CHAMELEONS = "local_chameleons"
         const val KEY_LOCAL_SIZE = "local_size"

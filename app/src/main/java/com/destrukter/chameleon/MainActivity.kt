@@ -13,6 +13,7 @@ import com.destrukter.chameleon.ui.CustomBoardsScreen
 import com.destrukter.chameleon.ui.LocalCategoryScreen
 import com.destrukter.chameleon.ui.LocalOverviewScreen
 import com.destrukter.chameleon.ui.LocalPassScreen
+import com.destrukter.chameleon.ui.LobbyBrowserScreen
 import com.destrukter.chameleon.ui.LocalSetupScreen
 import com.destrukter.chameleon.ui.MenuScreen
 import com.destrukter.chameleon.ui.OnlineHomeScreen
@@ -51,7 +52,8 @@ private fun ChameleonApp(onExit: () -> Unit, vm: AppViewModel = viewModel()) {
         Screen.LocalOverview -> LocalOverviewScreen(vm.local, onMenu = { vm.navigate(Screen.Menu) })
         Screen.OnlineHome -> OnlineHomeScreen(vm.online, onBack = back)
         Screen.OnlineSession -> OnlineSessionScreen(vm.online)
-        Screen.CustomBoards -> CustomBoardsScreen(vm.customBoards, vm.editor, onBack = back)
-        Screen.CustomBoardEditor -> CustomBoardEditorScreen(vm.editor, onBack = back)
+        Screen.CustomBoards -> CustomBoardsScreen(vm.library, vm.editor, onBack = back)
+        Screen.LobbyBrowser -> LobbyBrowserScreen(vm.online, onBack = back)
+        Screen.CustomBoardEditor -> CustomBoardEditorScreen(vm.editor, vm.library.allCategories(), onBack = back)
     }
 }

@@ -16,14 +16,15 @@ data class OnlineSettings(
 ) {
     fun sanitized(): OnlineSettings = copy(
         impostors = impostors.coerceIn(1, MAX_IMPOSTORS),
-        turnSeconds = turnSeconds.coerceIn(10, 300),
-        voteSeconds = voteSeconds.coerceIn(15, 600),
+        turnSeconds = turnSeconds.coerceIn(TURN_RANGE),
+        voteSeconds = voteSeconds.coerceIn(VOTE_RANGE),
     )
 
     companion object {
         const val MAX_IMPOSTORS = 7
-        val TURN_OPTIONS = listOf(15, 30, 45, 60, 90, 120)
-        val VOTE_OPTIONS = listOf(30, 60, 90, 120, 180, 300)
+        /** Seconds the host may choose for giving a word and for each vote. */
+        val TURN_RANGE = 10..300
+        val VOTE_RANGE = 15..600
     }
 }
 

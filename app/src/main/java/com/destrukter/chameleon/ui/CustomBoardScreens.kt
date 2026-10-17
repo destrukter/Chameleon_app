@@ -1,7 +1,28 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 
 package com.destrukter.chameleon.ui
 
+import android.content.Context
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.FileProvider
+import com.destrukter.chameleon.core.CategoryRepository
+import com.destrukter.chameleon.core.CustomLibrary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -50,10 +71,44 @@ import com.destrukter.chameleon.core.MatrixSize
 import com.destrukter.chameleon.core.WordMatrix
 
 @Composable
-fun CustomBoardsScreen(boards: List<CustomBoard>, editor: AppViewModel.BoardEditor, onBack: () -> Unit) {
+fun CustomBoardsScreen(library: CustomLibrary, editor: AppViewModel.BoardEditor, onBack: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
     var toDelete by remember { mutableStateOf<CustomBoard?>(null) }
+    var categoryDialog by remember { mutableStateOf<CategoryDialog?>(null) }
+    var deleteCategory by remember { mutableStateOf<String?>(null) }
+    var exporting by remember { mutableStateOf(false) }
+    var pendingExport by remember { mutableStateOf<String?>(null) }
+
+    val saveFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        val text = pendingExport
+        pendingExport = null
+        if (uri != null && text != null) {
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) {
+                    runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) } }.isSuccess
+                }
+                snackbar.showSnackbar(if (ok) "Boards saved." else "Couldn't save the file.")
+            }
+        }
+    }
+    val openFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val text = withContext(Dispatchers.IO) {
+                    runCatching {
+                        context.contentResolver.openInputStream(uri)?.use { it.readBytes().takeIf { b -> b.size < MAX_IMPORT_BYTES } }
+                    }.getOrNull()?.toString(Charsets.UTF_8)
+                }
+                snackbar.showSnackbar(if (text == null) "Couldn't read that file." else editor.import(text))
+            }
+        }
+    }
+
     Scaffold(
         topBar = { ChameleonTopBar("Custom boards", onBack) },
+        snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = { editor.create() },
@@ -71,40 +126,75 @@ fun CustomBoardsScreen(boards: List<CustomBoard>, editor: AppViewModel.BoardEdit
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(
-                "Your boards appear in the \"Custom\" topic pack for games of the same size. " +
+                "Each category is its own topic pack. A board can be played in games of its size. " +
                     "In multiplayer the host's boards are used and sent to every player.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (boards.isEmpty()) {
-                SectionCard(title = "No custom boards yet", icon = Icons.Default.Edit) {
-                    Text(
-                        "Tap \"New board\" to make one: pick a size, give it a topic and fill in a word for every cell.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = { categoryDialog = CategoryDialog(null) }, modifier = Modifier.weight(1f)) {
+                    Text("New category")
+                }
+                OutlinedButton(onClick = { openFile.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, modifier = Modifier.weight(1f)) {
+                    Text("Import")
+                }
+                OutlinedButton(onClick = { exporting = true }, enabled = library.boards.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                    Text("Export")
                 }
             }
-            MatrixSize.entries.forEach { size ->
-                val ofSize = boards.filter { it.size == size }
-                if (ofSize.isNotEmpty()) {
-                    SectionCard(title = "${size.label} · ${ofSize.size}", icon = Icons.Default.List) {
-                        ofSize.forEach { board ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(board.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
-                                    Text(
-                                        board.words.take(4).joinToString(", ") + "…",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                    )
-                                }
-                                IconButton(onClick = { editor.edit(board) }) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Edit ${board.name}")
-                                }
-                                IconButton(onClick = { toDelete = board }) {
-                                    Icon(Icons.Default.Delete, contentDescription = "Delete ${board.name}")
-                                }
+            library.allCategories().forEach { category ->
+                val boards = library.boardsIn(category)
+                val isDefault = category.equals(CategoryRepository.CUSTOM_PACK, ignoreCase = true)
+                SectionCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(category, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                sizeSummary(boards),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(onClick = { editor.create(category) }) {
+                            Icon(Icons.Default.Add, contentDescription = "New board in $category")
+                        }
+                        if (!isDefault) {
+                            IconButton(onClick = { categoryDialog = CategoryDialog(category) }) {
+                                Icon(Icons.Default.Edit, contentDescription = "Rename $category")
+                            }
+                            IconButton(onClick = { deleteCategory = category }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete $category")
+                            }
+                        }
+                    }
+                    if (boards.isEmpty()) {
+                        Text(
+                            "No boards yet – tap + to add one.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    boards.forEach { board ->
+                        HorizontalDivider()
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "${board.name}  ·  ${board.size.dimension}×${board.size.dimension}",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                Text(
+                                    board.words.take(4).joinToString(", ") + "…",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                            }
+                            IconButton(onClick = { editor.edit(board) }) {
+                                Icon(Icons.Default.Edit, contentDescription = "Edit ${board.name}")
+                            }
+                            IconButton(onClick = { toDelete = board }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete ${board.name}")
                             }
                         }
                     }
@@ -114,6 +204,7 @@ fun CustomBoardsScreen(boards: List<CustomBoard>, editor: AppViewModel.BoardEdit
             Spacer(Modifier.height(72.dp))
         }
     }
+
     toDelete?.let { board ->
         AlertDialog(
             onDismissRequest = { toDelete = null },
@@ -128,10 +219,146 @@ fun CustomBoardsScreen(boards: List<CustomBoard>, editor: AppViewModel.BoardEdit
             dismissButton = { TextButton(onClick = { toDelete = null }) { Text("Cancel") } },
         )
     }
+    deleteCategory?.let { category ->
+        AlertDialog(
+            onDismissRequest = { deleteCategory = null },
+            title = { Text("Delete category \"$category\"?") },
+            text = { Text("Its boards are kept and moved to \"Custom\".") },
+            confirmButton = {
+                TextButton(onClick = {
+                    editor.deleteCategory(category)
+                    deleteCategory = null
+                }) { Text("Delete") }
+            },
+            dismissButton = { TextButton(onClick = { deleteCategory = null }) { Text("Cancel") } },
+        )
+    }
+    categoryDialog?.let { dialog ->
+        CategoryNameDialog(
+            initial = dialog.renaming.orEmpty(),
+            title = if (dialog.renaming == null) "New category" else "Rename category",
+            onDismiss = { categoryDialog = null },
+            onConfirm = { name ->
+                val error = if (dialog.renaming == null) editor.addCategory(name) else editor.renameCategory(dialog.renaming, name)
+                if (error == null) categoryDialog = null
+                error
+            },
+        )
+    }
+    if (exporting) {
+        ExportDialog(
+            library = library,
+            onDismiss = { exporting = false },
+            onShare = { categories ->
+                exporting = false
+                shareBoards(context, editor.export(categories), fileName(categories))
+            },
+            onSave = { categories ->
+                exporting = false
+                pendingExport = editor.export(categories)
+                saveFile.launch(fileName(categories))
+            },
+        )
+    }
+}
+
+private class CategoryDialog(val renaming: String?)
+
+@Composable
+private fun CategoryNameDialog(initial: String, title: String, onDismiss: () -> Unit, onConfirm: (String) -> String?) {
+    var name by remember { mutableStateOf(initial) }
+    var error by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = {
+                    name = it.take(CustomLibrary.MAX_CATEGORY_LENGTH)
+                    error = null
+                },
+                label = { Text("Category name") },
+                singleLine = true,
+                isError = error != null,
+                supportingText = error?.let { message -> @Composable { Text(message) } },
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+            )
+        },
+        confirmButton = { TextButton(onClick = { error = onConfirm(name) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
-fun CustomBoardEditorScreen(editor: AppViewModel.BoardEditor, onBack: () -> Unit) {
+private fun ExportDialog(
+    library: CustomLibrary,
+    onDismiss: () -> Unit,
+    onShare: (List<String>) -> Unit,
+    onSave: (List<String>) -> Unit,
+) {
+    val withBoards = library.allCategories().filter { library.boardsIn(it).isNotEmpty() }
+    var selected by remember { mutableStateOf(withBoards.toSet()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Export boards") },
+        text = {
+            Column {
+                Text("Choose the categories to share. Friends import the file under Custom boards → Import.")
+                Spacer(Modifier.height(8.dp))
+                withBoards.forEach { category ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = category in selected,
+                            onCheckedChange = { selected = if (it) selected + category else selected - category },
+                        )
+                        Text("$category (${library.boardsIn(category).size})")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row {
+                TextButton(onClick = { onSave(selected.toList()) }, enabled = selected.isNotEmpty()) { Text("Save file") }
+                TextButton(onClick = { onShare(selected.toList()) }, enabled = selected.isNotEmpty()) { Text("Share") }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+private fun sizeSummary(boards: List<CustomBoard>): String =
+    if (boards.isEmpty()) {
+        "Empty"
+    } else {
+        MatrixSize.entries.mapNotNull { size ->
+            boards.count { it.size == size }.takeIf { it > 0 }?.let { "$it× ${size.dimension}×${size.dimension}" }
+        }.joinToString(" · ")
+    }
+
+private fun fileName(categories: List<String>): String {
+    val base = categories.singleOrNull()?.lowercase()?.replace(Regex("[^a-z0-9]+"), "-")?.trim('-')?.ifEmpty { null } ?: "boards"
+    return "chameleon-$base.json"
+}
+
+/** Hands the export to another app (messenger, mail, Drive…) as a file. */
+private fun shareBoards(context: Context, text: String, name: String) {
+    val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+    val file = File(dir, name).apply { writeText(text) }
+    val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
+    val send = Intent(Intent.ACTION_SEND).apply {
+        type = "application/json"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        putExtra(Intent.EXTRA_SUBJECT, "Chameleon boards")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(Intent.createChooser(send, "Share boards"))
+}
+
+private const val MAX_IMPORT_BYTES = 2_000_000
+
+@Composable
+fun CustomBoardEditorScreen(editor: AppViewModel.BoardEditor, categories: List<String>, onBack: () -> Unit) {
     val size = editor.size
     val filled = editor.words.count { it.isNotBlank() }
     Scaffold(topBar = { ChameleonTopBar(if (editor.editingId == null) "New board" else "Edit board", onBack) }) { padding ->
@@ -161,6 +388,16 @@ fun CustomBoardEditorScreen(editor: AppViewModel.BoardEditor, onBack: () -> Unit
                     label = { "${it.dimension}×${it.dimension}" },
                     onSelect = editor::changeSize,
                 )
+                Text("Category", style = MaterialTheme.typography.bodyLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    categories.forEach { category ->
+                        FilterChip(
+                            selected = category.equals(editor.category, ignoreCase = true),
+                            onClick = { editor.category = category },
+                            label = { Text(category) },
+                        )
+                    }
+                }
             }
 
             SectionCard(title = "Words · $filled of ${size.cellCount}", icon = Icons.Default.List) {

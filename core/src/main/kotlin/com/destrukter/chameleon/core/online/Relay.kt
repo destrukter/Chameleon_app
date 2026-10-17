@@ -7,6 +7,7 @@ import org.eclipse.paho.client.mqttv3.MqttConnectOptions
 import org.eclipse.paho.client.mqttv3.MqttException
 import org.eclipse.paho.client.mqttv3.MqttMessage
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence
+import com.destrukter.chameleon.core.Rules
 import java.io.Closeable
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -107,14 +108,23 @@ private fun randomClientId(): String {
 private const val QOS = 1
 private const val WAIT_MS = 12_000L
 
-/** The host's bridge between the relay and its [HostSession]. Each remote phone becomes one peer. */
+/**
+ * The host's bridge between the relay and its [HostSession]. Each remote phone becomes one peer.
+ * With a [publicListing] the lobby is also announced in the public lobby list until it is closed.
+ */
 class RelayHost private constructor(
     private val client: MqttAsyncClient,
     private val channel: RelayChannel,
     private val session: HostSession,
     /** The code to show to players, e.g. `E4KD-9QXM-27TB`. */
     val code: String,
+    private val publicListing: PublicSetup?,
 ) : Closeable {
+
+    /** Name and id of a lobby that is shown in the public list. */
+    class PublicSetup(val lobbyName: String, val id: String = PublicLobbies.newId())
+
+    val isPublic: Boolean get() = publicListing != null
 
     private class Remote(val peer: HostSession.Peer) {
         @Volatile var lastSeen = System.currentTimeMillis()
@@ -157,7 +167,40 @@ class RelayHost private constructor(
         })
         client.subscribe(channel.upTopic("+"), QOS).waitForCompletion(WAIT_MS)
         monitor.start()
+        if (publicListing != null) announcer(publicListing).start()
     }
+
+    /** Keeps the public listing current: on every change of players or phase, and periodically as a heartbeat. */
+    private fun announcer(setup: PublicSetup) = Thread {
+        var last: HostSession.Summary? = null
+        var lastSent = 0L
+        while (!closed) {
+            val summary = session.summary.value
+            val now = System.currentTimeMillis()
+            if (summary.hostName != null && (summary != last || now - lastSent > PublicLobbies.REFRESH_MS)) {
+                val listing = LobbyListing(
+                    id = setup.id,
+                    name = setup.lobbyName,
+                    hostName = summary.hostName,
+                    players = summary.players,
+                    maxPlayers = Rules.MAX_ONLINE_PLAYERS,
+                    inGame = summary.phase != Phase.LOBBY && summary.phase != Phase.RESULTS,
+                    code = code,
+                    updatedAt = now,
+                )
+                runCatching { client.publish(PublicLobbies.topic(setup.id), PublicLobbies.encode(listing), QOS, true) }
+                    .onSuccess {
+                        last = summary
+                        lastSent = now
+                    }
+            }
+            try {
+                Thread.sleep(1_000)
+            } catch (_: InterruptedException) {
+                break
+            }
+        }
+    }.apply { isDaemon = true }
 
     private fun linkFor(clientId: String) = object : PeerLink {
         override fun send(line: String) {
@@ -176,6 +219,8 @@ class RelayHost private constructor(
     override fun close() {
         closed = true
         monitor.interrupt()
+        // An empty retained message removes the lobby from the public list.
+        publicListing?.let { runCatching { client.publish(PublicLobbies.topic(it.id), ByteArray(0), QOS, true).waitForCompletion(2_000) } }
         remotes.values.forEach { it.peer.closed() }
         remotes.clear()
         runCatching { client.disconnect().waitForCompletion(2_000) }
@@ -184,14 +229,23 @@ class RelayHost private constructor(
 
     companion object {
         /** Connects to the first reachable broker. Blocking; throws [IOException] when none works. */
-        fun start(session: HostSession, brokers: List<String> = RelayCode.PUBLIC_BROKERS): RelayHost {
+        fun start(
+            session: HostSession,
+            brokers: List<String> = RelayCode.PUBLIC_BROKERS,
+            publicListing: PublicSetup? = null,
+        ): RelayHost {
             var lastError: Exception? = null
             brokers.forEachIndexed { index, uri ->
                 val code = RelayCode.generate(index)
                 val client = MqttAsyncClient(uri, "chm-host-" + randomClientId(), MemoryPersistence())
+                val options = mqttOptions().apply {
+                    // If the host's phone drops off without closing, the broker clears the listing for us.
+                    publicListing?.let { setWill(PublicLobbies.topic(it.id), ByteArray(0), QOS, true) }
+                }
                 try {
-                    client.connect(mqttOptions()).waitForCompletion(WAIT_MS)
-                    return RelayHost(client, RelayChannel(RelayCode.parse(code)!!.secret), session, code).also { it.start() }
+                    client.connect(options).waitForCompletion(WAIT_MS)
+                    return RelayHost(client, RelayChannel(RelayCode.parse(code)!!.secret), session, code, publicListing)
+                        .also { it.start() }
                 } catch (e: Exception) {
                     lastError = e
                     runCatching { client.close(true) }

@@ -59,10 +59,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -75,7 +78,9 @@ import com.destrukter.chameleon.core.online.GameClient
 import com.destrukter.chameleon.core.online.GameView
 import com.destrukter.chameleon.core.online.OnlineSettings
 import com.destrukter.chameleon.core.online.Phase
+import com.destrukter.chameleon.core.online.LobbyListing
 import com.destrukter.chameleon.core.online.Protocol
+import com.destrukter.chameleon.core.online.PublicLobbies
 
 @Composable
 fun OnlineHomeScreen(online: AppViewModel.OnlineController, onBack: () -> Unit) {
@@ -105,6 +110,33 @@ fun OnlineHomeScreen(online: AppViewModel.OnlineController, onBack: () -> Unit) 
                     "Your phone hosts the game. You'll get codes for friends on the same Wi-Fi and for friends anywhere else.",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                Text("Who can join?", style = MaterialTheme.typography.bodyLarge)
+                SegmentedChoice(
+                    options = listOf(false, true),
+                    selected = online.makePublic,
+                    label = { if (it) "Public" else "Private" },
+                    onSelect = { online.makePublic = it },
+                )
+                Text(
+                    if (online.makePublic) {
+                        "Listed in the public lobby browser – anyone can see it and join."
+                    } else {
+                        "Not listed anywhere – only people you give the code can join."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (online.makePublic) {
+                    OutlinedTextField(
+                        value = online.lobbyName,
+                        onValueChange = { online.lobbyName = it.take(PublicLobbies.MAX_NAME_LENGTH) },
+                        label = { Text("Lobby name") },
+                        placeholder = { Text(if (online.name.isBlank()) "Friday games" else "${online.name.trim()}'s lobby") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Done),
+                    )
+                }
                 Button(
                     onClick = { online.host() },
                     enabled = !online.busy,
@@ -113,7 +145,7 @@ fun OnlineHomeScreen(online: AppViewModel.OnlineController, onBack: () -> Unit) 
                     if (online.busy) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                     } else {
-                        Text("Create lobby")
+                        Text(if (online.makePublic) "Create public lobby" else "Create private lobby")
                     }
                 }
             }
@@ -131,7 +163,16 @@ fun OnlineHomeScreen(online: AppViewModel.OnlineController, onBack: () -> Unit) 
                     keyboardActions = KeyboardActions(onGo = { online.join() }),
                 )
                 Button(onClick = { online.join() }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                    Text("Join lobby")
+                    Text("Join with code")
+                }
+            }
+            SectionCard(title = "Public lobbies", icon = Icons.Default.Share) {
+                Text(
+                    "Find an open game to join, no code needed. Needs an internet connection.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedButton(onClick = { online.openBrowser() }, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                    Text("Browse public lobbies")
                 }
             }
             online.error?.let {
@@ -299,6 +340,15 @@ private fun LobbyContent(view: GameView, online: AppViewModel.OnlineController) 
             )
         }
         if (online.isHosting) {
+            Text(
+                if (online.hostingPublic) {
+                    if (online.relayStatus == AppViewModel.RelayStatus.Ready) "🌍 Public – listed in the lobby browser" else "🌍 Public – listed once the internet code is ready"
+                } else {
+                    "🔒 Private – join by code only"
+                },
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.secondary,
+            )
             when (val relay = online.relayStatus) {
                 AppViewModel.RelayStatus.Connecting -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -436,25 +486,66 @@ private fun SettingsCard(view: GameView, online: AppViewModel.OnlineController) 
             )
             HorizontalDivider()
         }
-        Text("Time to give a word", style = MaterialTheme.typography.bodyLarge)
-        SecondsChips(OnlineSettings.TURN_OPTIONS, settings.turnSeconds, editable) { update(settings.copy(turnSeconds = it)) }
-        Text("Time for each vote", style = MaterialTheme.typography.bodyLarge)
-        SecondsChips(OnlineSettings.VOTE_OPTIONS, settings.voteSeconds, editable) { update(settings.copy(voteSeconds = it)) }
+        SecondsField("Time to give a word", settings.turnSeconds, OnlineSettings.TURN_RANGE, editable) {
+            update(settings.copy(turnSeconds = it))
+        }
+        SecondsField("Time for each vote", settings.voteSeconds, OnlineSettings.VOTE_RANGE, editable) {
+            update(settings.copy(voteSeconds = it))
+        }
     }
 }
 
+/**
+ * A number field for a timer. The host types any value and it is sent when they press Done or leave the field,
+ * as long as it is a whole number within [range]. Other players see the host's value.
+ */
 @Composable
-private fun SecondsChips(options: List<Int>, selected: Int, enabled: Boolean, onSelect: (Int) -> Unit) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.forEach { seconds ->
-            FilterChip(
-                selected = seconds == selected,
-                onClick = { onSelect(seconds) },
-                enabled = enabled,
-                label = { Text(if (seconds >= 60 && seconds % 60 == 0) "${seconds / 60} min" else "${seconds}s") },
-            )
-        }
+private fun SecondsField(label: String, value: Int, range: IntRange, enabled: Boolean, onCommit: (Int) -> Unit) {
+    var text by remember { mutableStateOf(value.toString()) }
+    var focused by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    // Follow the host's value unless the field is being edited right now.
+    LaunchedEffect(value, focused) { if (!focused) text = value.toString() }
+    val parsed = text.toIntOrNull()
+    val valid = parsed != null && parsed in range
+    fun commit() {
+        if (valid && parsed != value) onCommit(parsed!!) else if (!valid) text = value.toString()
     }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { input -> text = input.filter { it.isDigit() }.take(3) },
+        label = { Text(label) },
+        suffix = { Text("seconds") },
+        singleLine = true,
+        enabled = enabled,
+        isError = enabled && !valid,
+        supportingText = {
+            Text(
+                when {
+                    !enabled -> formatSeconds(value)
+                    valid -> formatSeconds(parsed!!)
+                    else -> "Enter ${range.first}–${range.last} seconds"
+                }
+            )
+        },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
+        keyboardActions = KeyboardActions(onDone = {
+            commit()
+            focusManager.clearFocus()
+        }),
+        modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { state ->
+                if (focused && !state.isFocused) commit()
+                focused = state.isFocused
+            },
+    )
+}
+
+private fun formatSeconds(seconds: Int): String = when {
+    seconds < 60 -> "$seconds seconds"
+    seconds % 60 == 0 -> "${seconds / 60} min"
+    else -> "${seconds / 60} min ${seconds % 60} s"
 }
 
 @Composable
@@ -739,5 +830,68 @@ private fun ResultsContent(view: GameView, online: AppViewModel.OnlineController
         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
     ) {
         Text("Leave lobby")
+    }
+}
+
+@Composable
+fun LobbyBrowserScreen(online: AppViewModel.OnlineController, onBack: () -> Unit) {
+    val lobbies by online.publicLobbies.collectAsStateWithLifecycle()
+    val relays by online.reachableRelays.collectAsStateWithLifecycle()
+    val now = rememberNow()
+    val searching = now - online.browseStartedAt < 15_000
+    Scaffold(topBar = { ChameleonTopBar("Public lobbies", onBack) }) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                "Joining as ${online.name.trim()}. Open games appear here automatically.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            when {
+                lobbies.isNotEmpty() -> lobbies.forEach { LobbyRow(it, onJoin = { online.joinListing(it) }) }
+                searching -> CenteredMessage("Looking for public lobbies…", progress = true)
+                relays == 0 -> SectionCard(title = "Can't reach the lobby list") {
+                    Text("Check your internet connection and try again.", style = MaterialTheme.typography.bodyMedium)
+                    OutlinedButton(onClick = { online.openBrowser() }) { Text("Try again") }
+                }
+                else -> SectionCard(title = "No public lobbies right now") {
+                    Text(
+                        "Create one yourself and choose \"Public\" – it will show up here for everyone.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LobbyRow(listing: LobbyListing, onJoin: () -> Unit) {
+    val full = listing.players >= listing.maxPlayers
+    SectionCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(listing.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Host: ${listing.hostName} · ${listing.players}/${listing.maxPlayers} players",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    if (listing.inGame) "Round in progress – join when it ends" else "Waiting in the lobby",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (listing.inGame) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                )
+            }
+            Button(onClick = onJoin, enabled = !full && !listing.inGame) {
+                Text(if (full) "Full" else "Join")
+            }
+        }
     }
 }

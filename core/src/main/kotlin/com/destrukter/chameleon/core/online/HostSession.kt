@@ -6,6 +6,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -27,11 +30,18 @@ interface PeerLink {
  */
 class HostSession(private val engine: GameEngine) : Closeable {
 
+    /** What a public lobby listing shows about this lobby. */
+    data class Summary(val hostName: String?, val players: Int, val phase: Phase)
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutex = Mutex()
     private val players = mutableMapOf<Int, Peer>()
     private val chat = ArrayDeque<ChatMessage>()
     private var nextChatId = 1L
+    private val _summary = MutableStateFlow(Summary(null, 0, Phase.LOBBY))
+
+    /** Updated after every change, e.g. for the public lobby list. */
+    val summary: StateFlow<Summary> = _summary.asStateFlow()
 
     init {
         scope.launch {
@@ -150,6 +160,7 @@ class HostSession(private val engine: GameEngine) : Closeable {
     private fun publishLocked() {
         engine.drainSystemMessages().forEach { postChat(null, "Game", it, system = true) }
         players.forEach { (id, peer) -> peer.send(ServerMessage.State(engine.viewFor(id))) }
+        _summary.value = Summary(engine.nameOf(engine.hostId), engine.playerCount, engine.phase)
     }
 
     override fun close() {

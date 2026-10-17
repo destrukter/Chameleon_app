@@ -207,8 +207,9 @@ fun RulesScreen(onBack: () -> Unit) {
             RuleSection(
                 "Custom boards",
                 "Make your own topic cards under Custom boards in the menu – inside jokes, your friends' names, your " +
-                    "favourite show. Each board has a fixed size (4×4, 5×5 or 6×6) and appears in the \"Custom\" pack " +
-                    "for games of that size. In multiplayer, the host's custom boards are used and sent to everybody.",
+                    "favourite show – and sort them into your own categories. Each category is a topic pack for games " +
+                    "of the sizes it has boards for. Export categories as a file to share them, and import files from " +
+                    "friends. In multiplayer, the host's custom boards are used and sent to everybody.",
             )
             RuleSection(
                 "Multiplayer",

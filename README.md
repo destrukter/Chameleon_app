@@ -13,9 +13,12 @@ the chameleon, who has to bluff a clue that blends in. The app adds what the 3�
   Fantasy, Myth & History, Science & Tech, Arts, Music & Fashion, Home & Everyday Life, Out and About, and
   Describe It ("Things that are red", "Things with wheels", …).
 
-- **Custom boards**: design your own 4×4, 5×5 or 6×6 boards (menu → *Custom boards*). They go into a "Custom"
-  pack that can be selected only for games of a size you have boards for. In multiplayer the host's boards are
-  used, and the board drawn at the start is sent to every player with the rest of the game state.
+- **Custom boards**: design your own 4×4, 5×5 or 6×6 boards (menu → *Custom boards*) and sort them into your own
+  categories. Each category is a topic pack that can be selected only for games of a size it has boards for. In
+  multiplayer the host's boards are used, and the board drawn at the start is sent to every player.
+- **Share boards**: export some or all categories as a `.json` file (save it, or share it straight to a messenger)
+  and import files from friends. Imports merge: same boards are updated, name clashes get a number, and
+  incomplete boards are skipped.
 
 ## Install
 
@@ -49,10 +52,12 @@ reach the host in one of two ways, and both can be used in the same lobby.
   with AES-GCM using a key derived from the code, and the topic name is a hash of the code. This depends on those
   free public services being up.
 
-- **Create lobby** shows the codes. Players type either code into the same field and choose a name; duplicate
-  names are rejected.
-- The host chooses the number of chameleons, the board size, the topic packs, the time to give a word, and the
-  voting time. Everyone else sees the settings live in the lobby.
+- **Create lobby** asks whether the lobby is **public** or **private**. A private lobby can only be joined with its
+  code. A public one also appears in **Browse public lobbies**, where anyone can join with one tap; the listing is
+  a retained message on the relay broker, refreshed while the lobby is open and removed when it closes.
+- Players type either code into the same field and choose a name; duplicate names are rejected.
+- The host chooses the number of chameleons, the board size, the topic packs, and types in the time to give a word
+  (10–300 s) and the voting time (15–600 s). Everyone else sees the settings live in the lobby.
 - The game starts right away. Non-chameleons see the secret word highlighted on the board. The turn order is
   random, and each player has to type their word before their timer runs out (otherwise the turn is skipped).
 - A chat stays open the whole time for discussion.
